@@ -3473,7 +3473,7 @@ def schema_validation_to_xlsx(validation_results,
     value_errors = {}
     for ds in datasets:
         ve = validation_results[uid]['results'][ds].get('value_errors')
-        if bool(ve): 
+        if isinstance(ve, dict): 
             if 'pyspark.pandas.frame.DataFrame' in str(type(ve)):
                 ve = ve.to_pandas()
             try:
@@ -3484,7 +3484,7 @@ def schema_validation_to_xlsx(validation_results,
             except:
                 print(type(ve))
                 print(ve)
-                print(val_errs_df.columns)
+                
     if bool(value_errors): 
         rpt_sheets = {**rpt_sheets, **value_errors}
         sheet_order.extend(list(value_errors.keys()))
