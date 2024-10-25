@@ -2665,7 +2665,9 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
                             errs = value_errors_unallowed(df, col, allowed_values=allowed_vals, unique_column=unique_column)
                         
                         if errs is not None and len(errs) > 0:
-                            sheet_v_errors.append(errs.assign(Required=col_required, Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required, "Informational/Warning")))
+                            sheet_v_errors.append(
+                                errs.assign(Required=col_required, 
+                                            Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required, "Informational/Warning")))
 
 
         if 'regex_pattern' not in ignore_errors:
@@ -2677,7 +2679,10 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
                     if isinstance(ptrn, str) and ptrn not in Config.NA_VALUES:
                         errs = value_errors_regex_mismatches(df, col, regex_pattern=ptrn, unique_column=unique_column)
                         if errs is not None and len(errs) > 0: 
-                            sheet_v_errors.append(errs.assign(Required=col_required, Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required, "Informational/Warning")))
+                            sheet_v_errors.append(
+                                errs.assign(
+                                    Required=col_required, 
+                                    Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required, "Informational/Warning")))
 
 
         merged_errors_list = []
