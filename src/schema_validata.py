@@ -112,8 +112,8 @@ class Config:
 
     # Overview error message string formats
     SCHEMA_REQUIRED_MESSAGE_LEVELS = {
-        'True'       : "Error",  
-        'False'      : "Informational/Warning",  
+        True    : "Error",  
+        False   : "Informational/Warning",  
     }
 
     # Common US & ISO timestamp formats
@@ -2646,7 +2646,7 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
         if schema_violations:
             for col, errors in schema_violations.items():
                 flagged_errs = list(errors.keys())
-                col_required = col in required_cols
+                col_required = 'True' if col in required_cols else 'False'
                 for error_type in ['allow_null', 'unique_value', 'length', 'range_max', 'range_min', 'allowed_value_list']:
                     if error_type in flagged_errs and error_type not in ignore_errors:
                         errs = None
@@ -2675,7 +2675,7 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
         if 'regex_pattern' not in ignore_errors:
             for col in df.columns:
                 errs = None
-                col_required = col in required_cols
+                col_required = 'True' if col in required_cols else 'False'
                 if auth_schema.get(col):
                     ptrn = auth_schema[col].get('regex_pattern')
                     if isinstance(ptrn, str) and ptrn not in Config.NA_VALUES:
