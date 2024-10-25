@@ -3447,13 +3447,14 @@ def schema_validation_to_xlsx(validation_results,
                 if not bool(col_errs): 
                     continue
                 for k, vals in col_errs.items():
-                    if k not in ['status', 'required']:       
+                    # if k not in ['status', 'required']:       
                         error_ov.append({
                                         'Dataset': str(ds),
                                         'Column': str(col), 
                                         'Status': str(err_info['status']).title(), 
                                         'Required': str(req).title(), 
                                         "Error_Type": str(k), 
+                                        "Level": err_info['Level'], 
                                         'Error': str(vals['errors'])
                                         })
     if bool(error_ov):                    
@@ -3461,7 +3462,7 @@ def schema_validation_to_xlsx(validation_results,
     else:
         # use a blank sheet
         errors_ov_df = pd.DataFrame(columns=['Dataset', 'Column', 'Status', 
-                                            'Required', "Error_Type", 'Error']) 
+                                            'Required', "Error_Type", "Level", 'Error']) 
 
     rpt_sheets['Schema Overview'] = errors_ov_df
     sheet_order.append('Schema Overview')
