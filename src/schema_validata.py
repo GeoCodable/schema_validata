@@ -3482,7 +3482,7 @@ def schema_validation_to_xlsx(validation_results,
                                                     ascending=True)
                 value_errors[ds] = val_errs_df
             except:
-                print(type(ve)
+                print(type(ve))
                 print(ve.keys())
                 print(val_errs_df.columns)
     if bool(value_errors): 
