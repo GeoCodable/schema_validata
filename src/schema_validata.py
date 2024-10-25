@@ -3483,7 +3483,7 @@ def schema_validation_to_xlsx(validation_results,
                 value_errors[ds] = val_errs_df
             except:
                 print(type(ve))
-                print(ve.keys())
+                print(ve)
                 print(val_errs_df.columns)
     if bool(value_errors): 
         rpt_sheets = {**rpt_sheets, **value_errors}
