@@ -3454,7 +3454,7 @@ def schema_validation_to_xlsx(validation_results,
                                         'Status': str(err_info['status']).title(), 
                                         'Required': str(req).title(), 
                                         "Error_Type": str(k), 
-                                        "Level": err_info['Level'], 
+                                        "Level": str(vals['Level']), 
                                         'Error': str(vals['errors'])
                                         })
     if bool(error_ov):                    
