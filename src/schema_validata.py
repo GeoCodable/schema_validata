@@ -2670,7 +2670,7 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
                         
                         if len(errs) > 0:
                             sheet_v_errors.append(errs.assign(Required=col_required))
-                            sheet_v_errors.append(errs.assign(Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required))
+                            sheet_v_errors.append(errs.assign(Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required)))
 
 
         if 'regex_pattern' not in ignore_errors:
@@ -2683,7 +2683,7 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
                         errs = value_errors_regex_mismatches(df, col, regex_pattern=ptrn, unique_column=unique_column)
                         if len(errs) > 0: 
                             sheet_v_errors.append(errs.assign(Required=col_required))
-                            sheet_v_errors.append(errs.assign(Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required))
+                            sheet_v_errors.append(errs.assign(Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required)))
 
 
         merged_errors_list = []
