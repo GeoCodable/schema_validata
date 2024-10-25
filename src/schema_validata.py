@@ -112,8 +112,8 @@ class Config:
 
     # Overview error message string formats
     SCHEMA_REQUIRED_MESSAGE_LEVELS = {
-        'True'    : "Error",  
-        'False'   : "Informational/Warning",  
+        True    : "Error",  
+        False   : "Informational/Warning",  
     }
 
     # Common US & ISO timestamp formats
@@ -2647,7 +2647,7 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
         if schema_violations:
             for col, errors in schema_violations.items():
                 flagged_errs = list(errors.keys())
-                col_required = 'True' if col in required_cols else 'False'
+                col_required = col in required_cols 
                 for error_type in ['allow_null', 'unique_value', 'length', 'range_max', 'range_min', 'allowed_value_list']:
                     if error_type in flagged_errs and error_type not in ignore_errors:
                         errs = None
@@ -2676,7 +2676,7 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
         if 'regex_pattern' not in ignore_errors:
             for col in df.columns:
                 errs = None
-                col_required = 'True' if col in required_cols else 'False'
+                col_required =  col in required_cols 
                 if auth_schema.get(col):
                     ptrn = auth_schema[col].get('regex_pattern')
                     if isinstance(ptrn, str) and ptrn not in Config.NA_VALUES:
@@ -3444,6 +3444,7 @@ def schema_validation_to_xlsx(validation_results,
         for col, err_info in s_errs.items():
             if err_info['status'] == 'fail':
                 req = err_info['required']
+                print(col, req, type(req))
                 col_errs = s_errs.get(col)
                 if not bool(col_errs): 
                     continue
@@ -3455,7 +3456,7 @@ def schema_validation_to_xlsx(validation_results,
                                         'Status': str(err_info['status']).title(), 
                                         'Required': str(req).title(), 
                                         "Error_Type": str(k), 
-                                        "Level": Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(str(req).title()), 
+                                        "Level": Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(req), 
                                         'Error': str(vals['errors'])
                                         })
     if bool(error_ov):                    
