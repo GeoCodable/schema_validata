@@ -2624,10 +2624,6 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
                                             "Error_Type": "No Matching Schema in Data Dictionary",
                                             "Error_Value": _e,
                                             "Level": "Error",
-                                            # "Sheet_Row": 1,  
-                                            # "Column_Name": 'N/A',
-                                            # "Lookup_Column": 'N/A',
-                                            # "Lookup_Value" : 'N/A'
                                         }])
                             ]
             return {uid: {observed_ds: merged_errors_list}}
@@ -2668,9 +2664,8 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
                             allowed_vals = errors['allowed_value_list']['expected']
                             errs = value_errors_unallowed(df, col, allowed_values=allowed_vals, unique_column=unique_column)
                         
-                        if len(errs) > 0:
-                            sheet_v_errors.append(errs.assign(Required=col_required))
-                            sheet_v_errors.append(errs.assign(Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required)))
+                        if errs is not None and len(errs) > 0:
+                            sheet_v_errors.append(errs.assign(Required=col_required, Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required, "Informational/Warning")))
 
 
         if 'regex_pattern' not in ignore_errors:
@@ -2681,9 +2676,8 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
                     ptrn = auth_schema[col].get('regex_pattern')
                     if isinstance(ptrn, str) and ptrn not in Config.NA_VALUES:
                         errs = value_errors_regex_mismatches(df, col, regex_pattern=ptrn, unique_column=unique_column)
-                        if len(errs) > 0: 
-                            sheet_v_errors.append(errs.assign(Required=col_required))
-                            sheet_v_errors.append(errs.assign(Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required)))
+                        if errs is not None and len(errs) > 0: 
+                            sheet_v_errors.append(errs.assign(Required=col_required, Level=Config.SCHEMA_REQUIRED_MESSAGE_LEVELS.get(col_required, "Informational/Warning")))
 
 
         merged_errors_list = []
@@ -3444,7 +3438,7 @@ def schema_validation_to_xlsx(validation_results,
         for col, err_info in s_errs.items():
             if err_info['status'] == 'fail':
                 req = err_info['required']
-                print(col, req, type(req))
+
                 col_errs = s_errs.get(col)
                 if not bool(col_errs): 
                     continue
