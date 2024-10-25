@@ -112,8 +112,8 @@ class Config:
 
     # Overview error message string formats
     SCHEMA_REQUIRED_MESSAGE_LEVELS = {
-        True    : "Error",  
-        False   : "Informational/Warning",  
+        'True'    : "Error",  
+        'False'   : "Informational/Warning",  
     }
 
     # Common US & ISO timestamp formats
