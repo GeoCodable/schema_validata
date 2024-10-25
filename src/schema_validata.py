@@ -110,6 +110,12 @@ class Config:
         'regex_pattern'         : "Column '{col}' contains values which do not match the allowed format/pattern ."
     }
 
+    # Overview error message string formats
+    SCHEMA_REQUIRED_MESSAGE_LEVELS = {
+        'True'       : "Error",  
+        'False'      : "Informational/Warning",  
+    }
+
     # Common US & ISO timestamp formats
     COMMON_TIMESTAMPS = [
                         # Common US Formats - Time 
@@ -2663,6 +2669,8 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
                         
                         if len(errs) > 0:
                             sheet_v_errors.append(errs.assign(Required=col_required))
+                            sheet_v_errors.append(errs.assign(Level=SCHEMA_REQUIRED_MESSAGE_LEVELS[col_required]))
+
 
         if 'regex_pattern' not in ignore_errors:
             for col in df.columns:
@@ -2672,7 +2680,10 @@ def get_value_errors(dataset_path, schema_errors, data_dict,
                     ptrn = auth_schema[col].get('regex_pattern')
                     if isinstance(ptrn, str) and ptrn not in Config.NA_VALUES:
                         errs = value_errors_regex_mismatches(df, col, regex_pattern=ptrn, unique_column=unique_column)
-                        if len(errs) > 0: sheet_v_errors.append(errs.assign(Required=col_required))
+                        if len(errs) > 0: 
+                            sheet_v_errors.append(errs.assign(Required=col_required))
+                            sheet_v_errors.append(errs.assign(Level=SCHEMA_REQUIRED_MESSAGE_LEVELS[col_required]))
+
 
         merged_errors_list = []
         if bool(sheet_v_errors):
