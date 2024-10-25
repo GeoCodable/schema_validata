@@ -3476,12 +3476,13 @@ def schema_validation_to_xlsx(validation_results,
         if bool(ve): 
             if 'pyspark.pandas.frame.DataFrame' in str(type(ve)):
                 ve = ve.to_pandas()
-            val_errs_df = pd.DataFrame(ve)
             try:
+                val_errs_df = pd.DataFrame(ve)
                 val_errs_df = val_errs_df.sort_values(by="Sheet_Row",
                                                     ascending=True)
                 value_errors[ds] = val_errs_df
             except:
+                print(type(ve)
                 print(ve.keys())
                 print(val_errs_df.columns)
     if bool(value_errors): 
