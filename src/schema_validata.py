@@ -3444,6 +3444,9 @@ def schema_validation_to_xlsx(validation_results,
             if err_info['status'] == 'fail':
                 req = err_info['required']
 
+                if req is False:
+                    err_info['status'] = SCHEMA_REQUIRED_MESSAGE_LEVELS.get(False)
+
                 col_errs = s_errs.get(col)
                 if not bool(col_errs): 
                     continue
