@@ -25,6 +25,7 @@ except ImportError:
     pyspark_available = False
 from sqlite3 import connect                 # Standard library for creating and managing SQLite3 databases
 import sqlparse                             # Library for parsing SQL queries
+import sql_metadata                         # Library for advanced parsing of SQL queries
 
 #---------------------------------------------------------------------------------- 
 
@@ -2845,7 +2846,7 @@ def load_files_to_sql(files, include_tables=[]):
                         table_names.append(f)
                         print(f'\t\t-Loaded: table {tn}...')
                         continue                        
-                    
+
                 except Exception as e:
                     print(f'\t\t-Failed to load table {f}: {e}')
                     continue 
@@ -2935,57 +2936,57 @@ def extract_primary_table(sql_statement):
 
 #---------------------------------------------------------------------------------- 
 
-def extract_all_table_names(sql_statement):
-    """
-    Extracts all table names from an SQL statement using sqlparse.
+# def extract_all_table_names(sql_statement):
+#     """
+#     Extracts all table names from an SQL statement using sqlparse.
 
-    Parameters
-    ----------
-    sql_statement : str
-        The SQL statement to parse.
+#     Parameters
+#     ----------
+#     sql_statement : str
+#         The SQL statement to parse.
 
-    Returns
-    -------
-    list
-        A list of all table names found in the SQL statement.
-    """
-    parsed = sqlparse.parse(sql_statement)
-    stmt = parsed[0]
-    tables = []
+#     Returns
+#     -------
+#     list
+#         A list of all table names found in the SQL statement.
+#     """
+#     parsed = sqlparse.parse(sql_statement)
+#     stmt = parsed[0]
+#     tables = []
 
-    def is_subselect(parsed):
-        if not parsed.is_group:
-            return False
-        for item in parsed.tokens:
-            if item.ttype is sqlparse.tokens.DML and item.value.upper() == 'SELECT':
-                return True
-        return False
+#     def is_subselect(parsed):
+#         if not parsed.is_group:
+#             return False
+#         for item in parsed.tokens:
+#             if item.ttype is sqlparse.tokens.DML and item.value.upper() == 'SELECT':
+#                 return True
+#         return False
 
-    def extract_from_part(parsed):
-        from_seen = False
-        for item in parsed.tokens:
-            if from_seen:
-                if is_subselect(item):
-                    extract_from_part(item)
-                elif item.ttype is sqlparse.tokens.Keyword:
-                    return
-                elif item.ttype is None and isinstance(item, sqlparse.sql.IdentifierList):
-                    for identifier in item.get_identifiers():
-                        tables.append(identifier.get_real_name())
-                elif item.ttype is None and isinstance(item, sqlparse.sql.Identifier):
-                    tables.append(item.get_real_name())
-            elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
-                from_seen = True
+#     def extract_from_part(parsed):
+#         from_seen = False
+#         for item in parsed.tokens:
+#             if from_seen:
+#                 if is_subselect(item):
+#                     extract_from_part(item)
+#                 elif item.ttype is sqlparse.tokens.Keyword:
+#                     return
+#                 elif item.ttype is None and isinstance(item, sqlparse.sql.IdentifierList):
+#                     for identifier in item.get_identifiers():
+#                         tables.append(identifier.get_real_name())
+#                 elif item.ttype is None and isinstance(item, sqlparse.sql.Identifier):
+#                     tables.append(item.get_real_name())
+#             elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
+#                 from_seen = True
 
-    def extract_tables(parsed):
-        for item in parsed.tokens:
-            if item.is_group:
-                extract_tables(item)
-            elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
-                extract_from_part(parsed)
+#     def extract_tables(parsed):
+#         for item in parsed.tokens:
+#             if item.is_group:
+#                 extract_tables(item)
+#             elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
+#                 extract_from_part(parsed)
 
-    extract_tables(stmt)
-    return list(set(tables))
+#     extract_tables(stmt)
+#     return list(set(tables))
 
 #----------------------------------------------------------------------------------
 
@@ -3045,7 +3046,8 @@ def get_rows_with_condition_spark(tables, sql_statement, error_message, error_le
 
     # Extract the primary table name from the SQL statement
     primary_table = extract_primary_table(sql_statement)
-    q_tbls = extract_all_table_names(sql_statement)
+    parser = sql_metadata.Parser(sql_statement)
+    q_tbls = parser.tables
 
     try:
 
@@ -3230,7 +3232,11 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
     for index, row in rules_df.iterrows():
         sql_statement = row['SQL Error Query']
         sql_ref_tables.append(extract_primary_table(sql_statement))
-        sql_ref_tables.extend(extract_all_table_names(sql_statement)) 
+
+        parser = sql_metadata.Parser(sql_statement)
+        q_tbls = parser.tables
+        sql_ref_tables.extend(q_tbls) 
+        
     sql_ref_tables = list(set(sql_ref_tables))
     print(f'Loading tables: {sql_ref_tables}')
     # Load CSV files into an in-memory SQLite database, including only the referenced tables
