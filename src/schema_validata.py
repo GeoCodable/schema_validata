@@ -2843,11 +2843,9 @@ def load_files_to_sql(files, include_tables=[]):
                     tn = table_path_dict["table"]
                     if tn:
                         table_names.append(f)
+                        print(f'\t\t-Loaded: table {tn}...')
                         continue                        
-                #     df = Config.SPARK_SESSION.read.table(f)
-                #     df.createOrReplaceTempView(tn)
-                #     infer_and_replace_view_schema(Config.SPARK_SESSION, tn)
-                #     print(f'\t\t-Loaded: {tn} as a DataFrame...')
+                    
                 except Exception as e:
                     print(f'\t\t-Failed to load table {f}: {e}')
                     continue 
