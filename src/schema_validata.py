@@ -2770,6 +2770,39 @@ def infer_and_replace_view_schema(spark, view_name):
 
 #----------------------------------------------------------------------------------
 
+def parse_table_path(table_path):
+    """
+    Parse a SQL identifier into its constituent parts: host, database, schema, and table.
+
+    Parameters
+    ----------
+    table_path : str
+        The SQL identifier string to be parsed. It can contain up to four parts separated by dots.
+
+    Returns
+    -------
+    dict
+        A dictionary with keys 'host', 'database', 'schema', and 'table', where 
+        each key maps to the corresponding part of the identifier. If a part is 
+        not present in the identifier, its value will be None.
+
+    """
+    identifiers = table_path.split('.')
+    if len(identifiers) == 0:
+        return {'host': None, 'database': None, 'schema': None, 'table': table_path}
+    if len(identifiers) == 4:
+        return {'host': identifiers[0], 'database': identifiers[1], 'schema': identifiers[2], 'table': identifiers[3]}
+    elif len(identifiers) == 3:
+        return {'host': None, 'database': identifiers[0], 'schema': identifiers[1], 'table': identifiers[2]}
+    elif len(identifiers) == 2:
+        return {'host': None, 'database': None, 'schema': identifiers[0], 'table': identifiers[1]}
+    elif len(identifiers) == 1:
+        return {'host': None, 'database': None, 'schema': None, 'table': identifiers[0]}
+    else:
+        return {'host': None, 'database': None, 'schema': None, 'table': None}
+
+#----------------------------------------------------------------------------------    
+
 def load_files_to_sql(files, include_tables=[]):
     """
     Loads CSV files into Spark SQL tables if use_spark is True, otherwise into an in-memory SQLite database.
@@ -2789,22 +2822,36 @@ def load_files_to_sql(files, include_tables=[]):
 
     table_names = []
 
+    def is_filepath(path):
+        # Regular expression to check if the path is a Databricks file path format
+        file_path_pattern = re.compile(r'^(dbfs:/|/dbfs/|/mnt/).+\.csv$')
+        
+        if file_path_pattern.match(path):
+            return True
+        else:
+            return False
+    
     if Config.USE_PYSPARK:
         print(f"Creating tables in spark with version: {Config.SPARK_SESSION.version}")
         for f in files:
             print(f'\t-Loading: {f}...')
 
-            if not os.path.exists(f) and '.' in f:
-                tn = f.split('.')[-1]
+            if not is_filepath(f):
+                
                 try:
-                    df = Config.SPARK_SESSION.read.table(f)
-                    df.createOrReplaceTempView(tn)
-                    infer_and_replace_view_schema(Config.SPARK_SESSION, tn)
-                    print(f'\t\t-Loaded: {tn} as a DataFrame...')
+                    table_path_dict = parse_table_path(f)
+                    tn = table_path_dict["table"]
+                    if tn:
+                        table_names.append(f)
+                        continue                        
+                #     df = Config.SPARK_SESSION.read.table(f)
+                #     df.createOrReplaceTempView(tn)
+                #     infer_and_replace_view_schema(Config.SPARK_SESSION, tn)
+                #     print(f'\t\t-Loaded: {tn} as a DataFrame...')
                 except Exception as e:
-                    print(f'\t\t-Failed to load {f} as a DataFrame: {e}')
-                table_names.append(tn)
-                continue
+                    print(f'\t\t-Failed to load table {f}: {e}')
+                    continue 
+
 
             # Get the base name of the file without extension
             base_name = os.path.splitext(os.path.basename(f))[0]
