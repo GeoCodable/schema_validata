@@ -2796,9 +2796,13 @@ def load_files_to_sql(files, include_tables=[]):
 
             if not os.path.exists(f) and '.' in f:
                 tn = f.split('.')[-1]
-                spark.sql(f"CREATE TEMP VIEW {tn} AS SELECT * FROM {f}")
-                infer_and_replace_view_schema(Config.SPARK_SESSION, tn)
-                print(f'\t\t-Loaded: {tn}...')
+                try:
+                    df = Config.SPARK_SESSION.read.table(f)
+                    df.createOrReplaceTempView(tn)
+                    infer_and_replace_view_schema(Config.SPARK_SESSION, tn)
+                    print(f'\t\t-Loaded: {tn} as a DataFrame...')
+                except Exception as e:
+                    print(f'\t\t-Failed to load {f} as a DataFrame: {e}')
                 table_names.append(tn)
                 continue
 
