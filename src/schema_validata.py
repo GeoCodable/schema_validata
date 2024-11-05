@@ -2789,12 +2789,19 @@ def load_files_to_sql(files, include_tables=[]):
 
     table_names = []
 
-
-
     if Config.USE_PYSPARK:
         print(f"Creating tables in spark with version: {Config.SPARK_SESSION.version}")
         for f in files:
             print(f'\t-Loading: {f}...')
+
+            if not os.path.exists(f) and '.' in f:
+                tn = f.split('.')[-1]
+                spark.sql(f"CREATE TEMP VIEW {tn} AS SELECT * FROM {f}")
+                infer_and_replace_view_schema(Config.SPARK_SESSION, tn)
+                print(f'\t\t-Loaded: {tn}...')
+                table_names.append(tn)
+                continue
+
             # Get the base name of the file without extension
             base_name = os.path.splitext(os.path.basename(f))[0]
             
