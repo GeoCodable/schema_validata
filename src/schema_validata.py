@@ -3048,14 +3048,14 @@ def get_rows_with_condition_spark(tables, sql_statement, error_message, error_le
     primary_table = extract_primary_table(sql_statement)
     parser = sql_metadata.Parser(sql_statement)
     q_tbls = parser.tables
-    q_tbls = list(set(q_tbls + extract_all_table_names(sql_statement)))
     q_tbls = [t for t in q_tbls if Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
 
 
     try:
 
         if not all(t in tables for t in q_tbls) or primary_table not in tables:
-            skip_msg = f"Query skipped, one or more referenced tables not found: [{q_tbls}]"
+
+            skip_msg = f"Query skipped, one or more referenced tables not found, see query for details."
             results.append({
             "Primary_table"     : primary_table,
             "SQL_Error_Query"   : sql_statement,
