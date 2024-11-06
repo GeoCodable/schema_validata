@@ -2936,57 +2936,57 @@ def extract_primary_table(sql_statement):
 
 #---------------------------------------------------------------------------------- 
 
-# def extract_all_table_names(sql_statement):
-#     """
-#     Extracts all table names from an SQL statement using sqlparse.
+def extract_all_table_names(sql_statement):
+    """
+    Extracts all table names from an SQL statement using sqlparse.
 
-#     Parameters
-#     ----------
-#     sql_statement : str
-#         The SQL statement to parse.
+    Parameters
+    ----------
+    sql_statement : str
+        The SQL statement to parse.
 
-#     Returns
-#     -------
-#     list
-#         A list of all table names found in the SQL statement.
-#     """
-#     parsed = sqlparse.parse(sql_statement)
-#     stmt = parsed[0]
-#     tables = []
+    Returns
+    -------
+    list
+        A list of all table names found in the SQL statement.
+    """
+    parsed = sqlparse.parse(sql_statement)
+    stmt = parsed[0]
+    tables = []
 
-#     def is_subselect(parsed):
-#         if not parsed.is_group:
-#             return False
-#         for item in parsed.tokens:
-#             if item.ttype is sqlparse.tokens.DML and item.value.upper() == 'SELECT':
-#                 return True
-#         return False
+    def is_subselect(parsed):
+        if not parsed.is_group:
+            return False
+        for item in parsed.tokens:
+            if item.ttype is sqlparse.tokens.DML and item.value.upper() == 'SELECT':
+                return True
+        return False
 
-#     def extract_from_part(parsed):
-#         from_seen = False
-#         for item in parsed.tokens:
-#             if from_seen:
-#                 if is_subselect(item):
-#                     extract_from_part(item)
-#                 elif item.ttype is sqlparse.tokens.Keyword:
-#                     return
-#                 elif item.ttype is None and isinstance(item, sqlparse.sql.IdentifierList):
-#                     for identifier in item.get_identifiers():
-#                         tables.append(identifier.get_real_name())
-#                 elif item.ttype is None and isinstance(item, sqlparse.sql.Identifier):
-#                     tables.append(item.get_real_name())
-#             elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
-#                 from_seen = True
+    def extract_from_part(parsed):
+        from_seen = False
+        for item in parsed.tokens:
+            if from_seen:
+                if is_subselect(item):
+                    extract_from_part(item)
+                elif item.ttype is sqlparse.tokens.Keyword:
+                    return
+                elif item.ttype is None and isinstance(item, sqlparse.sql.IdentifierList):
+                    for identifier in item.get_identifiers():
+                        tables.append(identifier.get_real_name())
+                elif item.ttype is None and isinstance(item, sqlparse.sql.Identifier):
+                    tables.append(item.get_real_name())
+            elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
+                from_seen = True
 
-#     def extract_tables(parsed):
-#         for item in parsed.tokens:
-#             if item.is_group:
-#                 extract_tables(item)
-#             elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
-#                 extract_from_part(parsed)
+    def extract_tables(parsed):
+        for item in parsed.tokens:
+            if item.is_group:
+                extract_tables(item)
+            elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
+                extract_from_part(parsed)
 
-#     extract_tables(stmt)
-#     return list(set(tables))
+    extract_tables(stmt)
+    return list(set(tables))
 
 #----------------------------------------------------------------------------------
 
@@ -3049,6 +3049,8 @@ def get_rows_with_condition_spark(tables, sql_statement, error_message, error_le
     parser = sql_metadata.Parser(sql_statement)
     q_tbls = parser.tables
     q_tbls = [t for t in q_tbls if Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
+    q_tbls = list(set(q_tbls + extract_all_table_names(sql_statement)))
+
 
     try:
 
