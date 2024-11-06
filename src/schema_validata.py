@@ -3048,8 +3048,8 @@ def get_rows_with_condition_spark(tables, sql_statement, error_message, error_le
     primary_table = extract_primary_table(sql_statement)
     parser = sql_metadata.Parser(sql_statement)
     q_tbls = parser.tables
-    q_tbls = [t for t in q_tbls if Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
     q_tbls = list(set(q_tbls + extract_all_table_names(sql_statement)))
+    q_tbls = [t for t in q_tbls if Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
 
 
     try:
