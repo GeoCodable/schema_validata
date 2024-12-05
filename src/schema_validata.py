@@ -2964,22 +2964,7 @@ def extract_all_table_names(sql_statement):
     stmt = parsed[0]
     tables = []
 
-    reserved_words = [row['reserved_word'] for row in reserved_words_df.collect()]
-
     def is_subselect(parsed):
-        """
-        Checks if the parsed SQL segment is a subselect.
-
-        Parameters
-        ----------
-        parsed : sqlparse.sql.Statement
-            The parsed SQL segment.
-
-        Returns
-        -------
-        bool
-            True if the segment is a subselect, False otherwise.
-        """
         if not parsed.is_group:
             return False
         for item in parsed.tokens:
@@ -2988,14 +2973,6 @@ def extract_all_table_names(sql_statement):
         return False
 
     def extract_from_part(parsed):
-        """
-        Extracts table names from the FROM part of the SQL statement.
-
-        Parameters
-        ----------
-        parsed : sqlparse.sql.Statement
-            The parsed SQL segment.
-        """
         from_seen = False
         for item in parsed.tokens:
             if from_seen:
@@ -3005,25 +2982,13 @@ def extract_all_table_names(sql_statement):
                     return
                 elif item.ttype is None and isinstance(item, sqlparse.sql.IdentifierList):
                     for identifier in item.get_identifiers():
-                        real_name = identifier.get_real_name()
-                        if real_name and real_name.upper() not in reserved_words:
-                            tables.append(real_name)
+                        tables.append(identifier.get_real_name())
                 elif item.ttype is None and isinstance(item, sqlparse.sql.Identifier):
-                    real_name = item.get_real_name()
-                    if real_name and real_name.upper() not in reserved_words:
-                        tables.append(real_name)
+                    tables.append(item.get_real_name())
             elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
                 from_seen = True
 
     def extract_tables(parsed):
-        """
-        Recursively extracts table names from the parsed SQL statement.
-
-        Parameters
-        ----------
-        parsed : sqlparse.sql.Statement
-            The parsed SQL segment.
-        """
         for item in parsed.tokens:
             if item.is_group:
                 extract_tables(item)
@@ -3031,15 +2996,6 @@ def extract_all_table_names(sql_statement):
                 extract_from_part(parsed)
 
     extract_tables(stmt)
-    
-    try:
-        parsed_metadata = sql_metadata.Parser(sql_statement)
-        metadata_tables = parsed_metadata.tables
-        if metadata_tables:
-            return list(set(tables) & set(metadata_tables))
-    except Exception as e:
-        print(f"Error parsing SQL: {e}")
-
     return list(set(tables))
 
 #----------------------------------------------------------------------------------
@@ -3107,59 +3063,61 @@ def get_rows_with_condition_spark(tables, sql_statement, error_message, error_le
 
     try:
 
-        if not all(t in tables for t in q_tbls) or primary_table not in tables:
-
-            skip_msg = f"Query skipped, one or more referenced tables not found, see query for details."
-            results.append({
-            "Primary_table"     : primary_table,
-            "SQL_Error_Query"   : sql_statement,
-            "Message"           : skip_msg,
-            "Level"             : 'Skipped Query',
-            "Lookup_Column"     : '',
-            "Lookup_Value"      : ''
-            })
-            print(skip_msg)
-
-        else:
+        # if not all(t in tables for t in q_tbls) or primary_table not in tables:
+        #     missing_tables = [t for t in q_tbls if t not in tables]
             
-            # Get the DataFrame for the primary table
-            primary_df = Config.SPARK_SESSION.table(primary_table)
 
-            # Get the best unique ID column from the primary table
-            if primary_df.count() < 10000:
-                unique_column = get_best_uid_column(primary_df.toPandas())
-            else:
-                unique_column = get_best_uid_column(primary_df.pandas_api())
+            # skip_msg = f"Query skipped, one or more referenced tables not found, see query for details."
+            # results.append({
+            # "Primary_table"     : primary_table,
+            # "SQL_Error_Query"   : sql_statement,
+            # "Message"           : skip_msg,
+            # "Level"             : 'Skipped Query',
+            # "Lookup_Column"     : '',
+            # "Lookup_Value"      : ''
+            # })
+            # print(skip_msg)
 
-            # Register the primary table as a temporary view
-            primary_df.createOrReplaceTempView("primary_table")   
-                    
-            # Execute the modified SQL statement
-            result_df = Config.SPARK_SESSION.sql(sql_statement).toPandas()
+        # else:
+            
+        # Get the DataFrame for the primary table
+        primary_df = Config.SPARK_SESSION.table(primary_table)
 
-            result_df = handle_duplicate_columns(result_df)
+        # Get the best unique ID column from the primary table
+        if primary_df.count() < 10000:
+            unique_column = get_best_uid_column(primary_df.toPandas())
+        else:
+            unique_column = get_best_uid_column(primary_df.pandas_api())
 
-            if len(result_df) == 0:
-                # Append error information if no rows are returned
+        # Register the primary table as a temporary view
+        primary_df.createOrReplaceTempView("primary_table")   
+                
+        # Execute the modified SQL statement
+        result_df = Config.SPARK_SESSION.sql(sql_statement).toPandas()
+
+        result_df = handle_duplicate_columns(result_df)
+
+        if len(result_df) == 0:
+            # Append error information if no rows are returned
+            results.append({
+                "Primary_table"     : primary_table,
+                "SQL_Error_Query"   : sql_statement,
+                "Message"           : 'OK-No rows returned',
+                "Level"             : 'Good',
+                "Lookup_Column"     : '',
+                "Lookup_Value"      : ''
+            })
+        else:
+            # Prepare the results for each row in the result DataFrame
+            for row_index, row in result_df.iterrows():
                 results.append({
                     "Primary_table"     : primary_table,
                     "SQL_Error_Query"   : sql_statement,
-                    "Message"           : 'OK-No rows returned',
-                    "Level"             : 'Good',
-                    "Lookup_Column"     : '',
-                    "Lookup_Value"      : ''
+                    "Message"           : error_message,
+                    "Level"             : error_level,
+                    "Lookup_Column"     : unique_column,
+                    "Lookup_Value"      : row[unique_column]
                 })
-            else:
-                # Prepare the results for each row in the result DataFrame
-                for row_index, row in result_df.iterrows():
-                    results.append({
-                        "Primary_table"     : primary_table,
-                        "SQL_Error_Query"   : sql_statement,
-                        "Message"           : error_message,
-                        "Level"             : error_level,
-                        "Lookup_Column"     : unique_column,
-                        "Lookup_Value"      : row[unique_column]
-                    })
     except Exception as e:
         # Append error information if the SQL execution fails
         results.append({
