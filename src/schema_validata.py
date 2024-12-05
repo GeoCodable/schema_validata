@@ -2916,7 +2916,10 @@ def load_files_to_sql(files, include_tables=[]):
 
 def extract_primary_table(sql_statement):
     """
-    Extracts the primary table name from an SQL statement using sqlparse.
+    Extracts the primary table name from an SQL statement using sql_metadata.
+
+    This function attempts to identify the primary table by analyzing 
+    the query and potentially using schema information (if available).
 
     Parameters
     ----------
@@ -2928,10 +2931,17 @@ def extract_primary_table(sql_statement):
     str
         The primary table name if found, otherwise None.
     """
-    parsed = sqlparse.parse(sql_statement)
-    for token in parsed[0].tokens:
-        if token.ttype is None and token.get_real_name():
-            return token.get_real_name()
+    try:
+        parsed = sql_metadata.Parser(sql_statement)
+        tables = parsed.tables
+        if tables:
+            if len(tables) == 2:
+                return tables[0]
+            elif len(tables) >= 3:
+                return tables[-1]
+    except Exception as e:
+        print(f"Error parsing SQL: {e}")
+
     return None
 
 #---------------------------------------------------------------------------------- 
@@ -2954,7 +2964,22 @@ def extract_all_table_names(sql_statement):
     stmt = parsed[0]
     tables = []
 
+    reserved_words = [row['reserved_word'] for row in reserved_words_df.collect()]
+
     def is_subselect(parsed):
+        """
+        Checks if the parsed SQL segment is a subselect.
+
+        Parameters
+        ----------
+        parsed : sqlparse.sql.Statement
+            The parsed SQL segment.
+
+        Returns
+        -------
+        bool
+            True if the segment is a subselect, False otherwise.
+        """
         if not parsed.is_group:
             return False
         for item in parsed.tokens:
@@ -2963,6 +2988,14 @@ def extract_all_table_names(sql_statement):
         return False
 
     def extract_from_part(parsed):
+        """
+        Extracts table names from the FROM part of the SQL statement.
+
+        Parameters
+        ----------
+        parsed : sqlparse.sql.Statement
+            The parsed SQL segment.
+        """
         from_seen = False
         for item in parsed.tokens:
             if from_seen:
@@ -2972,13 +3005,25 @@ def extract_all_table_names(sql_statement):
                     return
                 elif item.ttype is None and isinstance(item, sqlparse.sql.IdentifierList):
                     for identifier in item.get_identifiers():
-                        tables.append(identifier.get_real_name())
+                        real_name = identifier.get_real_name()
+                        if real_name and real_name.upper() not in reserved_words:
+                            tables.append(real_name)
                 elif item.ttype is None and isinstance(item, sqlparse.sql.Identifier):
-                    tables.append(item.get_real_name())
+                    real_name = item.get_real_name()
+                    if real_name and real_name.upper() not in reserved_words:
+                        tables.append(real_name)
             elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
                 from_seen = True
 
     def extract_tables(parsed):
+        """
+        Recursively extracts table names from the parsed SQL statement.
+
+        Parameters
+        ----------
+        parsed : sqlparse.sql.Statement
+            The parsed SQL segment.
+        """
         for item in parsed.tokens:
             if item.is_group:
                 extract_tables(item)
@@ -2986,6 +3031,15 @@ def extract_all_table_names(sql_statement):
                 extract_from_part(parsed)
 
     extract_tables(stmt)
+    
+    try:
+        parsed_metadata = sql_metadata.Parser(sql_statement)
+        metadata_tables = parsed_metadata.tables
+        if metadata_tables:
+            return list(set(tables) & set(metadata_tables))
+    except Exception as e:
+        print(f"Error parsing SQL: {e}")
+
     return list(set(tables))
 
 #----------------------------------------------------------------------------------
