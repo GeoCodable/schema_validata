@@ -2916,10 +2916,7 @@ def load_files_to_sql(files, include_tables=[]):
 
 def extract_primary_table(sql_statement):
     """
-    Extracts the primary table name from an SQL statement using sql_metadata.
-
-    This function attempts to identify the primary table by analyzing 
-    the query and potentially using schema information (if available).
+    Extracts the primary table name from an SQL statement using sqlparse.
 
     Parameters
     ----------
@@ -2931,17 +2928,10 @@ def extract_primary_table(sql_statement):
     str
         The primary table name if found, otherwise None.
     """
-    try:
-        parsed = sql_metadata.Parser(sql_statement)
-        tables = parsed.tables
-        if tables:
-            if len(tables) == 2:
-                return tables[0]
-            elif len(tables) >= 3:
-                return tables[-1]
-    except Exception as e:
-        print(f"Error parsing SQL: {e}")
-
+    parsed = sqlparse.parse(sql_statement)
+    for token in parsed[0].tokens:
+        if token.ttype is None and token.get_real_name():
+            return token.get_real_name()
     return None
 
 #---------------------------------------------------------------------------------- 
