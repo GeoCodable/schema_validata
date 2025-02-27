@@ -18,7 +18,7 @@ A template [data_dictionary_template.xlsx](../../blob/main/data_dictionary_templ
 ## Installation and import 
   - *pip install*:
     ``` cmd
-    %pip install  git+https://github.com/ahamptonTIA/schema_validata.git
+    %pip install  git+https://github.com/GeoCodable/schema_validata.git
     ```
   - *Import*:
     ```python
