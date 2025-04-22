@@ -76,7 +76,7 @@ Define custom regex patterns, ranges, lengths, nulls, and unique columns within 
     - 'unique_value' : uniqeness/duplicates
     - 'length' : max string or value lengths 
     - 'range_min' :  minimum allowed value
-    - 'range_mmx' :  maximum allowed value
+    - 'range_max' :  maximum allowed value
     - 'allowed_value_list' : allowed values list
     - 'regex_pattern' : customized regex pattern checks
       
