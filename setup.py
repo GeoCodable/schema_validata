@@ -34,8 +34,8 @@ setuptools.setup(
         'pyspark>=3.4.1',
         'pandas>=1.4.4',
         # 'numpy>=1.21',  
-        'openpyxl>=3.0',
-        'sqlparse>=0.4',
-        'sql_metadata>=2.0'
+        'openpyxl',
+        'sqlparse',
+        'sql_metadata'
     ]
     )
