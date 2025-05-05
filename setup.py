@@ -6,7 +6,7 @@ with open('README.md', 'r') as fh:
 
 setuptools.setup(
     name='schema_validata',                 # name of the package
-    version='0.0.1',                        # release version
+    version='0.0.5',                        # release version
     author='ahamptonTIA',                   # org/author
     description=\
         '''
@@ -35,6 +35,8 @@ setuptools.setup(
                         'pandas>=1.4.4',  
                         'numpy,
                         'openpyxl',
-
+                        'sqlparse', 
+                        'sql_metadata'  
+                        #'sqlite3',
                     ]
     )
