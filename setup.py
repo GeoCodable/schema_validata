@@ -30,13 +30,12 @@ setuptools.setup(
     py_modules=['schema_validata'],         # name of the python package     
     package_dir={'':'src'},                 # directory of the source code of the package
     packages=setuptools.find_packages(where="src"), # list of all python modules to be installed
-    install_requires=[                     
-                        'pyspark>=3.4.1',
-                        'pandas>=1.4.4',  
-                        'numpy,
-                        'openpyxl',
-                        'sqlparse', 
-                        'sql_metadata'  
-                        #'sqlite3',
-                    ]
+    install_requires=[
+        'pyspark>=3.4.1',
+        'pandas>=1.4.4',
+        'numpy>=1.20', 
+        'openpyxl>=3.0',
+        'sqlparse>=0.4',
+        'sql_metadata>=2.0'
+    ]
     )
