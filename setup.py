@@ -31,9 +31,9 @@ setuptools.setup(
     package_dir={'':'src'},                 # directory of the source code of the package
     packages=setuptools.find_packages(where="src"), # list of all python modules to be installed
     install_requires=[                     
-                        'pyspark==3.4.1',
-                        'pandas==1.4.4',  
-                        'numpy<1.25,>=1.16.0',
+                        'pyspark>=3.4.1',
+                        'pandas>=1.4.4',  
+                        'numpy,
                         'openpyxl',
 
                     ]
