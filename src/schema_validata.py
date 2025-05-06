@@ -155,11 +155,45 @@ class Config:
                         "%Y-%m-%dT%H:%M:%S%z", # Combined Date and Time with Offset (Rare)
                         ]
 
-    # Standard pandas null value reps with other common formats, values will be read in as nulls
-    NA_VALUES = ['', ' ', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan','1.#IND', 
-                 '1.#QNAN', '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'n/a','nan', 'null', 'Null', 'NULL',
-                 '#REF!', np.nan, None, 'None'
-                ]   
+    if pd.__version__ >= '2.0':
+	    NA_VALUES = [
+	        '#N/A N/A',  # Less standard combination
+	        '-1.#IND',   # Specific float representation
+	        '-1.#QNAN',  # Specific float representation
+	        '1.#IND',    # Specific float representation
+	        '1.#QNAN',   # Specific float representation
+	        '<NA>',      # While pandas uses pd.NA, this string might not be default
+	        'NULL',      # Uppercase NULL
+	        'Null',      # Capitalized Null
+	        '#REF!'      # Excel error
+	    ]
+	else:
+	    NA_VALUES = [
+	        '',          # Empty string
+	        ' ',         # Single space
+	        '#N/A',      # Excel error
+	        '#N/A N/A',  # Less standard combination
+	        '#NA',       # Excel error
+	        '-1.#IND',   # Specific float representation
+	        '-1.#QNAN',  # Specific float representation
+	        '-NaN',      # Negative NaN
+	        '-nan',      # Negative NaN (lowercase)
+	        '1.#IND',    # Specific float representation
+	        '1.#QNAN',   # Specific float representation
+	        '<NA>',      # While pandas uses pd.NA, this string might not be default
+	        'N/A',       # Common representation of missing values
+	        'NA',        # Common representation of missing values
+	        'NULL',      # Uppercase NULL
+	        'NaN',       # Not a Number
+	        'n/a',       # Lowercase n/a
+	        'nan',       # Lowercase nan
+	        'null',      # Lowercase null
+	        'Null',      # Capitalized Null
+	        '#REF!',     # Excel error
+	        np.nan,      # NumPy NaN
+	        None,        # Python None
+	        'None'       # String None
+	    ]
 
     # Standard pattern reps for nulls, values will be converted to nulls
     NA_PATTERNS = [
@@ -1103,12 +1137,9 @@ def get_non_null_values(series):
     pandas.Series
         A Series with non-null and non-empty values.
     """
-    # Replace explicit NA values
-    non_null_values = series.replace(Config.NA_VALUES, pd.NA).dropna()
 
-    # Handle empty strings after stripping whitespace
-    stripped_series = non_null_values.astype(str).str.strip()
-    non_null_values = non_null_values[stripped_series != '']
+    non_null_values = series.replace(Config.NA_VALUES, pd.NA).dropna()
+    non_null_values = series.replace(r'^\s+$', pd.NA, regex=True).dropna()
 
     return non_null_values
 #---------------------------------------------------------------------------------- 
