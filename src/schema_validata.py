@@ -87,12 +87,14 @@ class Config:
         "allowed_value_list": "object"
     }
 
+
     # Data integrity schema
-    DATA_INTEGRITY_SCHEMA = {
-        'SQL_Error_Query': "object",
-        'Level': "object",
-        'Message': "object"
-    }
+    DATA_INTEGRITY_SCHEMA = {	
+	'Primary Table': "object",
+	'SQL Error Query': "object",
+	'Level': "object",
+	'Message': "object"
+    }	    
 
     # Data dictionary schema primary key field
     DATA_DICT_PRIMARY_KEY = "field_name"
@@ -920,25 +922,31 @@ def data_dict_to_json(data_dict_file,
         # Read the xlxs data dictionary file, convert each tab into a dataframe, 
         # Return a dictionary {tabName: dataframe}
         dfs = xlsx_tabs_to_pd_dataframes(data_dict_file,
-                                            rm_newlines=True, 
-                                            replace_char='',
-                                            infer=True,
-                                            na_values=na_values,
-                                            na_patterns=na_patterns
-                                            )
+                                         rm_newlines=True, 
+                                         replace_char='',
+                                         infer=True,
+                                         na_values=na_values,
+                                         na_patterns=na_patterns
+                                         )
 
         # Iterate through the dataframes to create a new subset dictionary
         data_dict = {}
         for sheet_name, df in dfs.items():
+            if sheet_name.lower() == 'data_integrity':
+                df = df.astype(DATA_INTEGRITY_SCHEMA)
+                missing_columns = set(DATA_INTEGRITY_SCHEMA.keys()) - set(df.columns)
+                if missing_columns:
+                    raise ValueError(f"Warning: Missing columns in DATA_INTEGRITY sheet schema: {missing_columns}")
+		
             # Check if each sheet/tab matches the data dictionary columns/schema and is not empty
-            if set(Config.DATA_DICT_SCHEMA.keys()).issubset(set(df.columns)) and len(df) != 0 :
+            if set(Config.DATA_DICT_SCHEMA.keys()).issubset(set(df.columns)) and len(df) != 0:
                 # Ensure data types
                 if isinstance(df, ps.DataFrame):
-                                    df = df.to_pandas()
+                    df = df.to_pandas()
                 df_with_types = df.astype(Config.DATA_DICT_SCHEMA, errors='ignore')
                 # Ignore rows without a field/column name
                 df_with_types = df_with_types.dropna(subset=[Config.DATA_DICT_PRIMARY_KEY], 
-                                                        inplace=False)
+                                                     inplace=False)
                 
                 # Convert the dataframes into dictionaries for easier lookup
                 df_with_types = df_with_types.set_index(Config.DATA_DICT_PRIMARY_KEY) 
