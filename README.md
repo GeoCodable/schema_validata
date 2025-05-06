@@ -18,7 +18,7 @@ A template [data_dictionary_template.xlsx](../../blob/main/data_dictionary_templ
 ## Installation and import 
   - *pip install*:
     ``` cmd
-    %pip install  git+https://github.com/ahamptonTIA/schema_validata.git
+    %pip install  git+https://github.com/GeoCodable/schema_validata.git
     ```
   - *Import*:
     ```python
@@ -76,7 +76,7 @@ Define custom regex patterns, ranges, lengths, nulls, and unique columns within 
     - 'unique_value' : uniqeness/duplicates
     - 'length' : max string or value lengths 
     - 'range_min' :  minimum allowed value
-    - 'range_mmx' :  maximum allowed value
+    - 'range_max' :  maximum allowed value
     - 'allowed_value_list' : allowed values list
     - 'regex_pattern' : customized regex pattern checks
       
