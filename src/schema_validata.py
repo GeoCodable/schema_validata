@@ -87,12 +87,14 @@ class Config:
         "allowed_value_list": "object"
     }
 
+
     # Data integrity schema
-    DATA_INTEGRITY_SCHEMA = {
-        'SQL_Error_Query': "object",
-        'Level': "object",
-        'Message': "object"
-    }
+    DATA_INTEGRITY_SCHEMA = {	
+	'Primary Table': "object",
+	'SQL Error Query': "object",
+	'Level': "object",
+	'Message': "object"
+    }	    
 
     # Data dictionary schema primary key field
     DATA_DICT_PRIMARY_KEY = "field_name"
@@ -155,11 +157,45 @@ class Config:
                         "%Y-%m-%dT%H:%M:%S%z", # Combined Date and Time with Offset (Rare)
                         ]
 
-    # Standard pandas null value reps with other common formats, values will be read in as nulls
-    NA_VALUES = ['', ' ', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan','1.#IND', 
-                 '1.#QNAN', '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'n/a','nan', 'null', 'Null', 'NULL',
-                 '#REF!', np.nan, None, 'None'
-                ]   
+    if pd.__version__ >= '1.5':
+	    NA_VALUES = [
+	        '#N/A N/A',  # Less standard combination
+	        '-1.#IND',   # Specific float representation
+	        '-1.#QNAN',  # Specific float representation
+	        '1.#IND',    # Specific float representation
+	        '1.#QNAN',   # Specific float representation
+	        '<NA>',      # While pandas uses pd.NA, this string might not be default
+	        'NULL',      # Uppercase NULL
+	        'Null',      # Capitalized Null
+	        '#REF!'      # Excel error
+	    ]
+    else:
+	    NA_VALUES = [
+	        '',          # Empty string
+	        ' ',         # Single space
+	        '#N/A',      # Excel error
+	        '#N/A N/A',  # Less standard combination
+	        '#NA',       # Excel error
+	        '-1.#IND',   # Specific float representation
+	        '-1.#QNAN',  # Specific float representation
+	        '-NaN',      # Negative NaN
+	        '-nan',      # Negative NaN (lowercase)
+	        '1.#IND',    # Specific float representation
+	        '1.#QNAN',   # Specific float representation
+	        '<NA>',      # While pandas uses pd.NA, this string might not be default
+	        'N/A',       # Common representation of missing values
+	        'NA',        # Common representation of missing values
+	        'NULL',      # Uppercase NULL
+	        'NaN',       # Not a Number
+	        'n/a',       # Lowercase n/a
+	        'nan',       # Lowercase nan
+	        'null',      # Lowercase null
+	        'Null',      # Capitalized Null
+	        '#REF!',     # Excel error
+	        np.nan,      # NumPy NaN
+	        None,        # Python None
+	        'None'       # String None
+	    ]
 
     # Standard pattern reps for nulls, values will be converted to nulls
     NA_PATTERNS = [
@@ -886,25 +922,31 @@ def data_dict_to_json(data_dict_file,
         # Read the xlxs data dictionary file, convert each tab into a dataframe, 
         # Return a dictionary {tabName: dataframe}
         dfs = xlsx_tabs_to_pd_dataframes(data_dict_file,
-                                            rm_newlines=True, 
-                                            replace_char='',
-                                            infer=True,
-                                            na_values=na_values,
-                                            na_patterns=na_patterns
-                                            )
+                                         rm_newlines=True, 
+                                         replace_char='',
+                                         infer=True,
+                                         na_values=na_values,
+                                         na_patterns=na_patterns
+                                         )
 
         # Iterate through the dataframes to create a new subset dictionary
         data_dict = {}
         for sheet_name, df in dfs.items():
+            if sheet_name.lower() == 'data_integrity':
+                df = df.astype(DATA_INTEGRITY_SCHEMA)
+                missing_columns = set(DATA_INTEGRITY_SCHEMA.keys()) - set(df.columns)
+                if missing_columns:
+                    raise ValueError(f"Warning: Missing columns in DATA_INTEGRITY sheet schema: {missing_columns}")
+		
             # Check if each sheet/tab matches the data dictionary columns/schema and is not empty
-            if set(Config.DATA_DICT_SCHEMA.keys()).issubset(set(df.columns)) and len(df) != 0 :
+            if set(Config.DATA_DICT_SCHEMA.keys()).issubset(set(df.columns)) and len(df) != 0:
                 # Ensure data types
                 if isinstance(df, ps.DataFrame):
-                                    df = df.to_pandas()
+                    df = df.to_pandas()
                 df_with_types = df.astype(Config.DATA_DICT_SCHEMA, errors='ignore')
                 # Ignore rows without a field/column name
                 df_with_types = df_with_types.dropna(subset=[Config.DATA_DICT_PRIMARY_KEY], 
-                                                        inplace=False)
+                                                     inplace=False)
                 
                 # Convert the dataframes into dictionaries for easier lookup
                 df_with_types = df_with_types.set_index(Config.DATA_DICT_PRIMARY_KEY) 
@@ -1103,11 +1145,11 @@ def get_non_null_values(series):
     pandas.Series
         A Series with non-null and non-empty values.
     """
+
     non_null_values = series.replace(Config.NA_VALUES, pd.NA).dropna()
     non_null_values = series.replace(r'^\s+$', pd.NA, regex=True).dropna()
 
     return non_null_values
-
 #---------------------------------------------------------------------------------- 
 
 def read_spreadsheet_with_params(file_path, 
