@@ -1103,11 +1103,14 @@ def get_non_null_values(series):
     pandas.Series
         A Series with non-null and non-empty values.
     """
+    # Replace explicit NA values
     non_null_values = series.replace(Config.NA_VALUES, pd.NA).dropna()
-    non_null_values = series.replace(r'^\s+$', pd.NA, regex=True).dropna()
+
+    # Handle empty strings after stripping whitespace
+    stripped_series = non_null_values.astype(str).str.strip()
+    non_null_values = non_null_values[stripped_series != '']
 
     return non_null_values
-
 #---------------------------------------------------------------------------------- 
 
 def read_spreadsheet_with_params(file_path, 
