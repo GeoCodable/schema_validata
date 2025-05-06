@@ -167,7 +167,7 @@ class Config:
 	        'Null',      # Capitalized Null
 	        '#REF!'      # Excel error
 	    ]
-	else:
+    else:
 	    NA_VALUES = [
 	        '',          # Empty string
 	        ' ',         # Single space
