@@ -155,7 +155,7 @@ class Config:
                         "%Y-%m-%dT%H:%M:%S%z", # Combined Date and Time with Offset (Rare)
                         ]
 
-    if pd.__version__ >= '2.0':
+    if pd.__version__ >= '1.5':
 	    NA_VALUES = [
 	        '#N/A N/A',  # Less standard combination
 	        '-1.#IND',   # Specific float representation
