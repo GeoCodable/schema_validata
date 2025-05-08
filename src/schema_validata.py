@@ -932,11 +932,11 @@ def data_dict_to_json(data_dict_file,
         # Iterate through the dataframes to create a new subset dictionary
         data_dict = {}
         for sheet_name, df in dfs.items():
-            # if sheet_name.lower() == 'data_integrity':
-            #     df = df.astype(Config.DATA_INTEGRITY_SCHEMA)
-            #     missing_columns = set(Config.DATA_INTEGRITY_SCHEMA.keys()) - set(df.columns)
-            #     if missing_columns:
-            #         raise ValueError(f"Warning: Missing columns in DATA_INTEGRITY sheet schema: {missing_columns}")
+            if sheet_name.lower() == 'data_integrity':
+                df = df.astype(Config.DATA_INTEGRITY_SCHEMA)
+                missing_columns = set(Config.DATA_INTEGRITY_SCHEMA.keys()) - set(df.columns)
+                if missing_columns:
+                    raise ValueError(f"Warning: Missing columns in DATA_INTEGRITY sheet schema: {missing_columns}")
 		
             # Check if each sheet/tab matches the data dictionary columns/schema and is not empty
             if set(Config.DATA_DICT_SCHEMA.keys()).issubset(set(df.columns)) and len(df) != 0:
