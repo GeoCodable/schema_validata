@@ -26,6 +26,7 @@ except ImportError:
 from sqlite3 import connect                 # Standard library for creating and managing SQLite3 databases
 import sqlparse                             # Library for parsing SQL queries
 import sql_metadata                         # Library for advanced parsing of SQL queries
+from sqllineage.runner import LineageRunner # More robust libary for itentifying sql parts
 
 #---------------------------------------------------------------------------------- 
 
@@ -2927,7 +2928,8 @@ def load_files_to_sql(files, include_tables=[]):
 
 def extract_primary_table(sql_statement):
     """
-    Extracts the primary table name from an SQL statement using sqlparse.
+    Extracts the full primary table path from an SQL statement using sqllineage.
+    This method is generally more robust for complex SQL and qualified names.
 
     Parameters
     ----------
@@ -2937,19 +2939,36 @@ def extract_primary_table(sql_statement):
     Returns
     -------
     str
-        The primary table name if found, otherwise None.
+        The full primary table path if found, otherwise None.
     """
-    parsed = sqlparse.parse(sql_statement)
-    for token in parsed[0].tokens:
-        if token.ttype is None and token.get_real_name():
-            return token.get_real_name()
-    return None
+    try:
+        result = LineageRunner(sql_statement)
+        tables = [
+            str(tbl).replace('Table: ', '').replace('<default>.', '')
+            for tbl in result.source_tables
+        ]
+        if tables:
+            # Try to pick the first table that appears in the SQL statement
+            sql_lower = sql_statement.lower()
+            table_positions = [(tbl, sql_lower.find(tbl.lower())) for tbl in tables if sql_lower.find(tbl.lower()) != -1]
+            if table_positions:
+                # Sort by position in SQL, pick the earliest
+                primary_table = sorted(table_positions, key=lambda x: x[1])[0][0]
+                return primary_table
+            else:
+                # Fallback: return the first table from sqllineage
+                return tables[0]
+        return None
+        return tables
+
+    except Exception as e:
+        return None
 
 #---------------------------------------------------------------------------------- 
 
 def extract_all_table_names(sql_statement):
     """
-    Extracts all table names from an SQL statement using sqlparse.
+    Extracts all fully qualified table names from an SQL statement using sqllineage.
 
     Parameters
     ----------
@@ -2959,45 +2978,17 @@ def extract_all_table_names(sql_statement):
     Returns
     -------
     list
-        A list of all table names found in the SQL statement.
+        A list of all fully qualified table names found in the SQL statement.
     """
-    parsed = sqlparse.parse(sql_statement)
-    stmt = parsed[0]
-    tables = []
-
-    def is_subselect(parsed):
-        if not parsed.is_group:
-            return False
-        for item in parsed.tokens:
-            if item.ttype is sqlparse.tokens.DML and item.value.upper() == 'SELECT':
-                return True
-        return False
-
-    def extract_from_part(parsed):
-        from_seen = False
-        for item in parsed.tokens:
-            if from_seen:
-                if is_subselect(item):
-                    extract_from_part(item)
-                elif item.ttype is sqlparse.tokens.Keyword:
-                    return
-                elif item.ttype is None and isinstance(item, sqlparse.sql.IdentifierList):
-                    for identifier in item.get_identifiers():
-                        tables.append(identifier.get_real_name())
-                elif item.ttype is None and isinstance(item, sqlparse.sql.Identifier):
-                    tables.append(item.get_real_name())
-            elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
-                from_seen = True
-
-    def extract_tables(parsed):
-        for item in parsed.tokens:
-            if item.is_group:
-                extract_tables(item)
-            elif item.ttype is sqlparse.tokens.Keyword and item.value.upper() == 'FROM':
-                extract_from_part(parsed)
-
-    extract_tables(stmt)
-    return list(set(tables))
+    try:
+        result = LineageRunner(sql_statement)
+        tables = [
+            str(tbl).replace('Table: ', '').replace('<default>.', '')
+            for tbl in result.source_tables
+        ]
+        return list(set(tables))
+    except Exception:
+        return []
 
 #----------------------------------------------------------------------------------
 
