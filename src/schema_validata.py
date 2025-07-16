@@ -693,40 +693,6 @@ def detect_file_encoding(file_path):
         print(f"Encoding confidence for '{file_path}' is low (< 50%). Using pandas default.")
         return None
 
-# ----------------------------------------------------------------------------------
-  
-def db_path_to_local(path):
-    """Function returns a local os file path from dbfs file path
-    Parameters
-    ----------
-    path : str
-        DataBricks dbfs file storage path
-    Returns
-    ----------
-    file path: str
-        local os file path
-    """    
-    if path.startswith(r'/mnt'):
-        path = f"{r'/dbfs'}{path}"
-    return re.sub(r'^(dbfs:)', r'/dbfs', path)
-#----------------------------------------------------------------------------------
-def to_dbfs_path(path):
-    """Function converts a local os file path to a dbfs file path
-    Parameters
-    ----------
-    path : str
-        local os file path
-    Returns
-    ----------
-    file path: str
-        DataBricks dbfs file storage path
-    """        
-    if path.startswith(r'/mnt'):
-        return path
-    if path.startswith(r'dbfs:'):
-        return re.sub(r'^(dbfs:)','', path)        
-    if path.startswith(r'/dbfs'): 
-        return re.sub(r'^(/dbfs)','', path)        
 #----------------------------------------------------------------------------------   
 def read_spreadsheets(file_path, 
                       sheet_name=None, 
