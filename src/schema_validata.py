@@ -268,7 +268,7 @@ def to_dbfs_path(path):
     """        
     if path.startswith(r'/mnt'):
         path = f"{r'dbfs:'}{path}" 
-    if not path.startswith('/Volumes') and path.startswith('/dbfs'):
+    if not path.startswith(r'/Volumes') and path.startswith(r'/dbfs'):
         path = re.sub(r'^(/dbfs)', r'dbfs:', path)         
     return path 
 
