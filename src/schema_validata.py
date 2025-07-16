@@ -3272,7 +3272,7 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
     if sheet_name in pd.ExcelFile(data_dict_path).sheet_names:
         if Config.USE_PYSPARK:
             # rules_df = ps.read_excel(to_dbfs_path(data_dict_path), sheet_name=sheet_name)  encountered bug with 'squeeze at 3.5.0
-            pdf = pd.read_excel(dh.to_dbfs_path(data_dict_path), sheet_name=sheet_name)
+            pdf = pd.read_excel(to_dbfs_path(data_dict_path), sheet_name=sheet_name)
             rules_df = ps.from_pandas(pdf)
         else:
             rules_df = pd.read_excel(data_dict_path, sheet_name=sheet_name)
