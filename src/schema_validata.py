@@ -267,8 +267,9 @@ def to_dbfs_path(path):
         DataBricks dbfs file storage path
     """        
     if path.startswith(r'/mnt'):
-        path = f"{r'dbfs:'}{path}"        
-    return re.sub(r'^(/dbfs)', r'dbfs:', path)   
+        path = f"{r'dbfs:'}{path}" 
+        path = re.sub(r'^(/dbfs)', r'dbfs:', path)         
+    return path 
 
 #----------------------------------------------------------------------------------    
 
