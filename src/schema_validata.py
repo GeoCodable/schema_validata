@@ -268,9 +268,9 @@ def to_dbfs_path(path):
     """        
     if path.startswith(r'/mnt'):
         path = f"{r'dbfs:'}{path}" 
+    if not path.startswith('/Volumes') and path.startswith('/dbfs'):
         path = re.sub(r'^(/dbfs)', r'dbfs:', path)         
     return path 
-
 #----------------------------------------------------------------------------------    
 
 def get_byte_units(size_bytes):
