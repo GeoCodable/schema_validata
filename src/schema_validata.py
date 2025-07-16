@@ -2836,7 +2836,7 @@ def load_files_to_sql(files, include_tables=[]):
 
     def is_filepath(path):
         # Regular expression to check if the path is a Databricks file path format
-        file_path_pattern = re.compile(r'^(dbfs:/|/dbfs/|/mnt/).+\.csv$')
+        file_path_pattern = re.compile(r'^(dbfs:/|/dbfs/|/mnt/|/Volumes/).+\.csv$')
         
         if file_path_pattern.match(path):
             return True
