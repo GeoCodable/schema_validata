@@ -3256,7 +3256,7 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
         # q_tbls = parser.tables
         # sql_ref_tables.extend(q_tbls) 
         
-    sql_ref_tables = list(set(sql_ref_tables))
+    #sql_ref_tables = list(set(sql_ref_tables))
     # print(f'Loading tables: {sql_ref_tables}')
     # Load CSV files into an in-memory if needed
     conn, tables = load_files_to_sql(files, include_tables=sql_ref_tables)
