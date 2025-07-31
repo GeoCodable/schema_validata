@@ -439,7 +439,7 @@ def get_best_uid_column(df, preferred_column=None):
 
     Parameters:
     -----------
-    df : pandas.DataFrame or pyspark.sql.DataFrame or pyspark.pandas.DataFrame
+    df : pandas.DataFrame or pyspark.pandas.DataFrame
         The input DataFrame.
     preferred_column : str, optional
         The preferred column if ties for uniqueness occur.
@@ -448,28 +448,19 @@ def get_best_uid_column(df, preferred_column=None):
     --------
     str or None
         The column name with the most unique values, or None if none qualify.
-
-    Raises:
-    -------
-    ValueError
-        If `df` is not a pandas, Spark, or spark.pandas DataFrame.
     """
-    is_pandas = isinstance(df, pd.DataFrame)
-    is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
-
-    if not (is_pandas or is_spark_pandas):
-        raise ValueError("Input must be a pandas or spark.pandas DataFrame.")
+    if not isinstance(df, ps.DataFrame):
+        try:
+            df = ps.from_pandas(df)
+        except TypeError:
+            df = df.to_pandas_on_spark()
 
     uniq_cnts = {}
     uid_dtypes = ['Integer', 'String']
     for col in df.columns:
-        if 'pyspark.pandas.series.Series' in str(type(df[col])):
-            _s = df[col].to_pandas()
-        else:
-            _s = df[col]
-
-        if infer_data_types(_s) in uid_dtypes:
-            unique_vals = _s.dropna().nunique()
+        dtype = infer_data_types(df[col])
+        if dtype in uid_dtypes:
+            unique_vals = df[col].dropna().nunique()
             uniq_cnts[col] = int(unique_vals)
 
     if uniq_cnts:
@@ -479,7 +470,7 @@ def get_best_uid_column(df, preferred_column=None):
         return preferred_column
 
     if uid_cols:
-        if preferred_column:
+        if preferred_column and preferred_column in uniq_cnts:
             uid_cols = [c for c in uid_cols if uniq_cnts[c] > uniq_cnts[preferred_column]]
         if not uid_cols:
             return preferred_column
@@ -1281,42 +1272,39 @@ def infer_data_types(series):
         "Null-Unknown", "Boolean", "Integer", "Float", 
         "Datetime", "String", or "Other".
     """
+    if not isinstance(series, ps.Series):
+        series = ps.from_pandas(series)
 
-    if 'pyspark.pandas.series.Series' in str(type(series)):
-        series = series.to_pandas()
+    non_null_values = series.dropna()
 
-    # non_null_values = series.replace(r'^\s+$', pd.NA, regex=True).dropna()
-    non_null_values = get_non_null_values(series)
-
-    if len(non_null_values) == 0:
+    if non_null_values.count() == 0:
         return "Null-Unknown"
     else:
-        if pd.api.types.is_bool_dtype(non_null_values):
+        dtype = str(non_null_values.dtype)
+        if dtype == "bool":
             return "Boolean"
-        elif pd.api.types.is_integer_dtype(non_null_values):
+        elif dtype in ["int8", "int16", "int32", "int64"]:
             return "Integer"
-        elif pd.api.types.is_float_dtype(non_null_values):
+        elif dtype in ["float16", "float32", "float64"]:
             return "Float"
-        elif pd.api.types.is_datetime64_any_dtype(non_null_values):
+        elif "datetime" in dtype or "date" in dtype:
             return "Datetime"
-        elif pd.api.types.is_string_dtype(non_null_values) or pd.api.types.is_categorical_dtype(non_null_values):
+        elif dtype == "object" or dtype == "string":
+            # Try to infer numeric or datetime
             try:
-                converted_numeric = pd.to_numeric(non_null_values)
-                if pd.api.types.is_bool_dtype(converted_numeric):
-                    return "Boolean"
-                if pd.api.types.is_integer_dtype(converted_numeric):
+                converted_numeric = non_null_values.astype(float)
+                if (converted_numeric == converted_numeric.astype(int)).all():
                     return "Integer"
                 else:
                     return "Float"
             except:
                 try:
-                    dt = pd.to_datetime(non_null_values.astype(str), infer_datetime_format=True)
+                    _ = non_null_values.astype("datetime64[ns]")
                     return "Datetime"
                 except:
                     return "String"
         else:
             return "Other"
-    
 
 #---------------------------------------------------------------------------------- 
 
@@ -3052,14 +3040,12 @@ def handle_duplicate_columns(df):
 
 #----------------------------------------------------------------------------------
 
-def get_rows_with_condition_spark(tables, sql_statement, error_message, error_level='error'):
+def get_rows_with_condition_spark(sql_statement, error_message, error_level='error'):
     """
     Returns rows with a unique ID column value where a condition is true in the first table listed in an SQL statement.
 
     Parameters
     ----------
-    tables : list of str
-        List of table names available in Spark.
     sql_statement : str
         The SQL statement to execute.
     error_message : str
@@ -3072,49 +3058,45 @@ def get_rows_with_condition_spark(tables, sql_statement, error_message, error_le
     pd.DataFrame
         A DataFrame containing the primary table name, SQL error query, lookup column, and lookup value.
     """
-    results = []
+    try:    
+        results = []
 
-    # Extract the primary table name from the SQL statement
-    primary_table = extract_primary_table(sql_statement)
-    parser = sql_metadata.Parser(sql_statement)
-    q_tbls = parser.tables
-    q_tbls = [t for t in q_tbls if Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
-
-
-    try:
-
-        # if not all(t in tables for t in q_tbls) or primary_table not in tables:
-        #     missing_tables = [t for t in q_tbls if t not in tables]
-            
-
-            # skip_msg = f"Query skipped, one or more referenced tables not found, see query for details."
-            # results.append({
-            # "Primary_table"     : primary_table,
-            # "SQL_Error_Query"   : sql_statement,
-            # "Message"           : skip_msg,
-            # "Level"             : 'Skipped Query',
-            # "Lookup_Column"     : '',
-            # "Lookup_Value"      : ''
-            # })
-            # print(skip_msg)
-
-        # else:
+        # Extract the primary table name from the SQL statement
+        primary_table = extract_primary_table(sql_statement)
+        if primary_table is None:
+            raise ValueError(f"Primary table from {sql_statement} could not be determined from the SQL statement.")
+        # parser = sql_metadata.Parser(sql_statement)
+        q_tbls = extract_all_table_names(sql_statement)
+        missing_tables = [t for t in q_tbls if not Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
+        if missing_tables:
+            raise ValueError(f"The following tables from {sql_statement} do not exist in the catalog: {missing_tables}")
             
         # Get the DataFrame for the primary table
         primary_df = Config.SPARK_SESSION.table(primary_table)
 
         # Get the best unique ID column from the primary table
-        if primary_df.count() < 10000:
-            unique_column = get_best_uid_column(primary_df.toPandas())
-        else:
+        try:
             unique_column = get_best_uid_column(primary_df.pandas_api())
+        except:
+            try:
+                unique_column = get_best_uid_column(ps.DataFrame(primary_df))
+            except:
+                unique_column = get_best_uid_column(primary_df.toPandas())
 
-        # Register the primary table as a temporary view
-        primary_df.createOrReplaceTempView("primary_table")   
+
+        # Register the primary table as a temporary view only if it does not exist in Unity Catalog
+        if not Config.SPARK_SESSION._jsparkSession.catalog().tableExists(primary_table):
+            primary_df.createOrReplaceTempView(primary_table)
                 
         # Execute the modified SQL statement
-        result_df = Config.SPARK_SESSION.sql(sql_statement).toPandas()
-
+        spark_result = Config.SPARK_SESSION.sql(sql_statement)
+        try:
+            result_df = spark_result.pandas_api()
+        except:
+            try:
+                result_df = ps.DataFrame(spark_result)
+            except:
+                result_df = spark_result.toPandas()
         result_df = handle_duplicate_columns(result_df)
 
         if len(result_df) == 0:
@@ -3268,15 +3250,15 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
     # Extract table references from each SQL rule
     for index, row in rules_df.iterrows():
         sql_statement = row['SQL Error Query']
-        sql_ref_tables.append(extract_primary_table(sql_statement))
+        sql_ref_tables.append(extract_all_table_names(sql_statement))
 
-        parser = sql_metadata.Parser(sql_statement)
-        q_tbls = parser.tables
-        sql_ref_tables.extend(q_tbls) 
+        # parser = sql_metadata.Parser(sql_statement)
+        # q_tbls = parser.tables
+        # sql_ref_tables.extend(q_tbls) 
         
     sql_ref_tables = list(set(sql_ref_tables))
     # print(f'Loading tables: {sql_ref_tables}')
-    # Load CSV files into an in-memory SQLite database, including only the referenced tables
+    # Load CSV files into an in-memory if needed
     conn, tables = load_files_to_sql(files, include_tables=sql_ref_tables)
 
     # Iterate over each rule in the rules DataFrame
@@ -3288,7 +3270,7 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
         print(f'\nRunning query: \n\t\t{sql_statement}')
         if conn == 'pyspark_pandas':
             # Get rows that meet the condition specified in the SQL statement
-            error_rows = get_rows_with_condition_spark(tables, sql_statement, error_message, error_level)
+            error_rows = get_rows_with_condition_spark(sql_statement, error_message, error_level)
         else:
             # Get rows that meet the condition specified in the SQL statement
             error_rows = get_rows_with_condition_sqlite(tables, sql_statement, error_message, error_level, conn)
