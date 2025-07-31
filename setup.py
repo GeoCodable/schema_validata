@@ -36,6 +36,7 @@ setuptools.setup(
         # 'numpy>=1.21',  
         'openpyxl',
         # 'sqlparse',
+        'sqlglot',
         'sql_metadata',
         'sqllineage'
     ]
