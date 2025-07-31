@@ -27,7 +27,7 @@ from sqlite3 import connect                 # Standard library for creating and 
 import sqlparse                             # Library for parsing SQL queries
 import sql_metadata                         # Library for advanced parsing of SQL queries
 from sqllineage.runner import LineageRunner # More robust libary for itentifying sql parts
-
+import sqlglot                              # Most robust library for parsing and analyzing SQL queries
 #---------------------------------------------------------------------------------- 
 
 # List of warnings to silence
@@ -2928,8 +2928,8 @@ def load_files_to_sql(files, include_tables=[]):
 
 def extract_primary_table(sql_statement):
     """
-    Extracts the full primary table path from an SQL statement using sqllineage.
-    This method is generally more robust for complex SQL and qualified names.
+    Extracts the primary table name from an SQL statement using sqlglot,
+    falling back to sqllineage and sqlparse if needed.
 
     Parameters
     ----------
@@ -2939,9 +2939,20 @@ def extract_primary_table(sql_statement):
     Returns
     -------
     str
-        The full primary table path if found, otherwise None.
+        The primary table name if found, otherwise None.
     """
-    try:
+
+    expr = sqlglot.parse_one(sql_statement)
+    tables = expr.find_all(sqlglot.expressions.Table)
+    if tables:
+        tables_list = list(tables)
+        for t in tables_list:
+            # Return the fully qualified table name using Databricks dialect
+            return t.sql(dialect="databricks").split()[0]
+        table_names = [tbl.name for tbl in tables_list]
+        return table_names[0] if table_names else None
+    else:
+
         result = LineageRunner(sql_statement)
         tables = [
             str(tbl).replace('Table: ', '').replace('<default>.', '')
@@ -2958,17 +2969,20 @@ def extract_primary_table(sql_statement):
             else:
                 # Fallback: return the first table from sqllineage
                 return tables[0]
-        return None
-        return tables
 
-    except Exception as e:
-        return None
+        else:
+            parsed = sqlparse.parse(sql_statement)
+            for token in parsed[0].tokens:
+                if token.ttype is None and token.get_real_name():
+                    return token.get_real_name()
+            return None
 
 #---------------------------------------------------------------------------------- 
 
 def extract_all_table_names(sql_statement):
     """
-    Extracts all fully qualified table names from an SQL statement using sqllineage.
+    Extracts all fully qualified table names from an SQL statement using sqlglot, 
+    falling back to sqllineage and sqlparse if needed.
 
     Parameters
     ----------
@@ -2981,12 +2995,26 @@ def extract_all_table_names(sql_statement):
         A list of all fully qualified table names found in the SQL statement.
     """
     try:
-        result = LineageRunner(sql_statement)
-        tables = [
-            str(tbl).replace('Table: ', '').replace('<default>.', '')
-            for tbl in result.source_tables
-        ]
-        return list(set(tables))
+        expr = sqlglot.parse_one(sql_statement)
+        tables = expr.find_all(sqlglot.expressions.Table)
+        if tables:
+            table_names = [t.sql(dialect="databricks").split()[0] for t in tables]
+            return list(set(table_names))
+        else:
+            result = LineageRunner(sql_statement)
+            tables = [
+                str(tbl).replace('Table: ', '').replace('<default>.', '')
+                for tbl in result.source_tables
+            ]
+            if tables:
+                return list(set(tables))
+            else:
+                parsed = sqlparse.parse(sql_statement)
+                found = []
+                for token in parsed[0].tokens:
+                    if token.ttype is None and token.get_real_name():
+                        found.append(token.get_real_name())
+                return list(set(found))
     except Exception:
         return []
 
