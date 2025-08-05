@@ -3239,45 +3239,40 @@ def convert_to_pyspark_pandas(df):
 	
 #----------------------------------------------------------------------------------
 
-def get_rows_with_condition_spark(sql_statement, error_message, error_level='error'):
+def get_rows_with_condition_spark(sql_statement, primary_table=None, error_message='Error', error_level='error'):
     """
-    Returns rows with a unique ID column value where a condition is true in the first table listed in an SQL statement.
+    Executes a SQL statement in Spark and returns rows from the result, including a unique identifier column.
 
     Parameters
     ----------
     sql_statement : str
         The SQL statement to execute.
-    error_message : str
-        The error message to include in the results if the condition is met.
+    primary_table : str, optional
+        The primary table name. If not provided, it will be extracted from the SQL.
+    error_message : str, optional
+        The error message to include in the results (default is 'Error').
     error_level : str, optional
-        The level of the error (default is 'error').
+        The error level to include in the results (default is 'error').
 
     Returns
     -------
     pd.DataFrame
-        A DataFrame containing the primary table name, SQL error query, lookup column, and lookup value.
+        DataFrame with columns: Primary_table, SQL_Error_Query, Message, Level, Lookup_Column, Lookup_Value, Error_Value.
     """
     results = []
     try:    
 
-        # Extract the primary table name from the SQL statement
-        primary_table = extract_primary_table(sql_statement)
-        if primary_table is None:
-            raise ValueError(f"Primary table from {sql_statement} could not be determined from the SQL statement.")
-        # parser = sql_metadata.Parser(sql_statement)
+        # Extract the table names and set primary table name for the SQL statement
         q_tbls = extract_all_table_names(sql_statement)
+
+        if not (isinstance(primary_table, str) and bool(primary_table)):
+            primary_table = q_tbls[0]
         missing_tables = [t for t in q_tbls if not Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
         if missing_tables:
             raise ValueError(f"The following tables from {sql_statement} do not exist in the catalog: {missing_tables}")
 
         # Find all unique columns in the entire query
-        sql_ref_cols = get_all_columns_from_sql(sql_statement)
-
-        # Get the DataFrame for the primary table
-        primary_df = Config.SPARK_SESSION.table(primary_table)
-        # Register the primary table as a temporary view only if it does not exist in Unity Catalog
-        if not Config.SPARK_SESSION._jsparkSession.catalog().tableExists(primary_table):
-            primary_df.createOrReplaceTempView(primary_table)
+        sql_ref_cols = get_all_columns_from_sql(sql_query)
                 
         # Execute the modified SQL statement
         spark_result = Config.SPARK_SESSION.sql(sql_statement)
@@ -3457,6 +3452,7 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
 
     # Iterate over each rule in the rules DataFrame
     for index, row in rules_df.iterrows():
+	primary_table = str(row['Primary Table'])
         sql_statement = str(row['SQL Error Query'])
         error_level = str(row['Level'])
         error_message = str(row['Message'])
@@ -3464,7 +3460,10 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
         print(f'\nRunning query: \n\t\t{sql_statement}')
         if conn == 'pyspark_pandas':
             # Get rows that meet the condition specified in the SQL statement
-            error_rows = get_rows_with_condition_spark(sql_statement, error_message, error_level)
+            error_rows = get_rows_with_condition_spark(sql_statement=sql_statement, 
+						       primary_table=primary_table, 
+						       error_message=error_message, 
+						       error_level=error_level
         else:
             # Get rows that meet the condition specified in the SQL statement
             error_rows = get_rows_with_condition_sqlite(tables, sql_statement, error_message, error_level, conn)
