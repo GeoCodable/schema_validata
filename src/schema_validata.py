@@ -464,10 +464,7 @@ def get_best_uid_column(df, preferred_column=None):
         If the input DataFrame is empty (has no columns).
     """
     # Handle different DataFrame types to work with pyspark.pandas API
-    if isinstance(df, pd.DataFrame):
-        df = ps.from_pandas(df)
-    elif isinstance(df, ):
-        df = df.pandas_api()
+    df = convert_to_pyspark_pandas(df)
         
     uniq_counts = {}
     for col in df.columns:
@@ -3217,14 +3214,14 @@ def convert_to_pyspark_pandas(df):
 
     result_df = None
     try:
-        if isinstance(df, ):
+        if isinstance(df, SparkDataFrame):
             result_df = df.pandas_api()
         elif isinstance(df, pd.DataFrame):
             result_df = ps.from_pandas(df)
     except Exception as e:
         warnings.warn(f"Using legacy conversion to pyspark.pandas due to: {e}")
         try:
-            if isinstance(df, ):
+            if isinstance(df,SparkDataFrame ):
                 # Fallback to a legacy method (less efficient for large data)
                 result_df = ps.from_pandas(df.toPandas())
             elif isinstance(df, pd.DataFrame):
