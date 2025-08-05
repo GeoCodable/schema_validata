@@ -3324,81 +3324,81 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
 
 #---------------------------------------------------------------------------------- 
 
-def get_rows_with_condition_sqlite(tables, sql_statement, conn, error_message, error_level='error'):
-    """
-    Returns rows with a unique ID column value where a condition is true in the first table listed in an SQL statement.
+# def get_rows_with_condition_sqlite(tables, sql_statement, conn, error_message, error_level='error'):
+#     """
+#     Returns rows with a unique ID column value where a condition is true in the first table listed in an SQL statement.
 
-    Parameters
-    ----------
-    tables : list of str
-        List of table names available in the SQLite database.
-    sql_statement : str
-        The SQL statement to execute.
-    conn : sqlite3.Connection
-        The SQLite connection object.
-    error_message : str
-        The error message to include in the results if the condition is met.
-    error_level : str, optional
-        The level of the error (default is 'error').
+#     Parameters
+#     ----------
+#     tables : list of str
+#         List of table names available in the SQLite database.
+#     sql_statement : str
+#         The SQL statement to execute.
+#     conn : sqlite3.Connection
+#         The SQLite connection object.
+#     error_message : str
+#         The error message to include in the results if the condition is met.
+#     error_level : str, optional
+#         The level of the error (default is 'error').
 
-    Returns
-    -------
-    pd.DataFrame
-        A DataFrame containing the primary table name, SQL error query, lookup column, and lookup value.
-    """
+#     Returns
+#     -------
+#     pd.DataFrame
+#         A DataFrame containing the primary table name, SQL error query, lookup column, and lookup value.
+#     """
     
-    # Extract the primary table name from the SQL statement
-    primary_table = extract_primary_table(sql_statement)
+#     # Extract the primary table name from the SQL statement
+#     primary_table = extract_primary_table(sql_statement)
 
-    # Get the best unique ID column from the primary table
-    unique_column = get_best_uid_column(pd.read_sql(f'SELECT * FROM {primary_table}', conn))
+#     # Get the best unique ID column from the primary table
+#     unique_column = get_best_uid_column(pd.read_sql(f'SELECT * FROM {primary_table}', conn))
 
-    # Modify the SQL statement to select the unique ID column
-    modified_sql = f"""
-                    SELECT 
-                        pt.{unique_column}
-                    FROM ({sql_statement}) AS sq
-                    LEFT JOIN {primary_table} pt ON sq.{unique_column} = pt.{unique_column}
-                    """
+#     # Modify the SQL statement to select the unique ID column
+#     modified_sql = f"""
+#                     SELECT 
+#                         pt.{unique_column}
+#                     FROM ({sql_statement}) AS sq
+#                     LEFT JOIN {primary_table} pt ON sq.{unique_column} = pt.{unique_column}
+#                     """
 
-    results = []
-    try:
-        # Execute the modified SQL statement
-        result_df = pd.read_sql(modified_sql, conn)
+#     results = []
+#     try:
+#         # Execute the modified SQL statement
+#         result_df = pd.read_sql(modified_sql, conn)
 
-        if result_df.empty:
-            # Append error information if no rows are returned
-            results.append({
-                "Primary_table"     : primary_table,
-                "SQL_Error_Query"   : sql_statement,
-                "Message"           : 'OK-No rows returned',
-                "Level"             : 'Good',
-                "Lookup_Column"     : '',
-                "Lookup_Value"      : ''
-            })
-        else:
-            # Prepare the results for each row in the result DataFrame
-            for row_index, row in result_df.iterrows():
-                results.append({
-                    "Primary_table"     : primary_table,
-                    "SQL_Error_Query"   : sql_statement,
-                    "Message"           : error_message,
-                    "Level"             : error_level,
-                    "Lookup_Column"     : unique_column,
-                    "Lookup_Value"      : row[unique_column]
-                })
-    except Exception as e:
-        # Append error information if the SQL execution fails
-        results.append({
-            "Primary_table"     : primary_table,
-            "SQL_Error_Query"   : sql_statement,
-            "Message"           : f"Query SQL failed: {str(e)}",
-            "Level"             : 'Error',
-            "Lookup_Column"     : '',
-            "Lookup_Value"      : ''
-        })
+#         if result_df.empty:
+#             # Append error information if no rows are returned
+#             results.append({
+#                 "Primary_table"     : primary_table,
+#                 "SQL_Error_Query"   : sql_statement,
+#                 "Message"           : 'OK-No rows returned',
+#                 "Level"             : 'Good',
+#                 "Lookup_Column"     : '',
+#                 "Lookup_Value"      : ''
+#             })
+#         else:
+#             # Prepare the results for each row in the result DataFrame
+#             for row_index, row in result_df.iterrows():
+#                 results.append({
+#                     "Primary_table"     : primary_table,
+#                     "SQL_Error_Query"   : sql_statement,
+#                     "Message"           : error_message,
+#                     "Level"             : error_level,
+#                     "Lookup_Column"     : unique_column,
+#                     "Lookup_Value"      : row[unique_column]
+#                 })
+#     except Exception as e:
+#         # Append error information if the SQL execution fails
+#         results.append({
+#             "Primary_table"     : primary_table,
+#             "SQL_Error_Query"   : sql_statement,
+#             "Message"           : f"Query SQL failed: {str(e)}",
+#             "Level"             : 'Error',
+#             "Lookup_Column"     : '',
+#             "Lookup_Value"      : ''
+#         })
 
-    return pd.DataFrame(results)
+#     return pd.DataFrame(results)
 
 #----------------------------------------------------------------------------------
 
@@ -3464,9 +3464,9 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
 						       primary_table=primary_table, 
 						       error_message=error_message, 
 						       error_level=error_level
-        else:
-            # Get rows that meet the condition specified in the SQL statement
-            error_rows = get_rows_with_condition_sqlite(tables, sql_statement, error_message, error_level, conn)
+        # else:
+        #     # Get rows that meet the condition specified in the SQL statement
+        #     error_rows = get_rows_with_condition_sqlite(tables, sql_statement, error_message, error_level, conn)
         
         # If there are any error rows, concatenate them to the errors DataFrame
         if not error_rows.empty:
