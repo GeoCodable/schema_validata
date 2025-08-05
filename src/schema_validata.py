@@ -28,6 +28,7 @@ import sqlparse                             # Library for parsing SQL queries
 import sql_metadata                         # Library for advanced parsing of SQL queries
 from sqllineage.runner import LineageRunner # More robust libary for itentifying sql parts
 import sqlglot                              # Most robust library for parsing and analyzing SQL queries
+from sqlglot.expressions import Star, Select, Table, With
 #---------------------------------------------------------------------------------- 
 
 # List of warnings to silence
@@ -434,50 +435,86 @@ def downcast_ints(value):
 
 def get_best_uid_column(df, preferred_column=None):
     """
-    Identifies the column with the most unique values (excluding nulls) in a DataFrame.
-    Supports pandas, Spark, and spark.pandas DataFrames.
+    Identifies the column with the most unique values to serve as a primary key.
 
-    Parameters:
-    -----------
-    df : pandas.DataFrame or pyspark.pandas.DataFrame
-        The input DataFrame.
+    This function evaluates columns based on their data type and uniqueness to
+    select the best candidate for a unique identifier (UID). It prioritizes
+    columns that are fully unique and of an integer-like type. In case of a tie,
+    a preferred column is selected. A column name is always returned.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame, pyspark.pandas.DataFrame, or pyspark.sql.DataFrame
+        The input DataFrame to be analyzed.
     preferred_column : str, optional
-        The preferred column if ties for uniqueness occur.
+        A column name to be chosen in the event of a tie for the most
+        unique values. The default is None.
 
-    Returns:
-    --------
-    str or None
-        The column name with the most unique values, or None if none qualify.
+    Returns
+    -------
+    str
+        The name of the column identified as the best UID.
+        If no suitable columns are found, it returns the preferred column
+        or the first column of the DataFrame as a fallback.
+
+    Raises
+    ------
+    ValueError
+        If the input DataFrame is empty (has no columns).
     """
-    if not isinstance(df, ps.DataFrame):
-        try:
-            df = ps.from_pandas(df)
-        except TypeError:
-            df = df.to_pandas_on_spark()
-
-    uniq_cnts = {}
-    uid_dtypes = ['Integer', 'String']
+    # Handle different DataFrame types to work with pyspark.pandas API
+    if isinstance(df, pd.DataFrame):
+        df = ps.from_pandas(df)
+    elif isinstance(df, SparkDataFrame):
+        df = df.pandas_api()
+        
+    uniq_counts = {}
     for col in df.columns:
-        dtype = infer_data_types(df[col])
-        if dtype in uid_dtypes:
+        dtype = str(df[col].dtype)
+        
+        # Evaluate integer-like columns. They must be fully unique.
+        if dtype.startswith('int'):
             unique_vals = df[col].dropna().nunique()
-            uniq_cnts[col] = int(unique_vals)
-
-    if uniq_cnts:
-        max_value = max(uniq_cnts.values())
-        uid_cols = [c for c, uc in uniq_cnts.items() if uc > 0 and uc == max_value]
-    else:
-        return preferred_column
-
-    if uid_cols:
-        if preferred_column and preferred_column in uniq_cnts:
-            uid_cols = [c for c in uid_cols if uniq_cnts[c] > uniq_cnts[preferred_column]]
-        if not uid_cols:
+            total_vals = len(df[col].dropna())
+            if unique_vals == total_vals:
+                uniq_counts[col] = total_vals
+        # Evaluate string columns that can be cast to an integer type.
+        # They also must be fully unique.
+        elif dtype.startswith('string') or dtype == 'object':
+            try:
+                # Attempt to convert all non-null values to int
+                temp_series = df[col].dropna().astype('int64')
+                unique_vals = temp_series.nunique()
+                total_vals = len(df[col].dropna())
+                if unique_vals == total_vals:
+                    uniq_counts[col] = total_vals
+            except (ValueError, TypeError):
+                # If conversion fails, this column is not a string-int UID candidate.
+                # Continue to the next column.
+                continue
+        # For other data types, just count unique non-null values.
+        else:
+            uniq_counts[col] = df[col].dropna().nunique()
+            
+    if uniq_counts:
+        max_count = max(uniq_counts.values())
+        best_columns = [col for col, count in uniq_counts.items() if count == max_count]
+        
+        # Tie-breaking: select the preferred column if it's one of the best.
+        if preferred_column and preferred_column in best_columns:
             return preferred_column
-        return uid_cols[0]
-    else:
+        
+        if best_columns:
+            return best_columns[0]
+            
+    # Fallback logic: A column must always be returned.
+    if preferred_column and preferred_column in df.columns:
         return preferred_column
     
+    return df.columns[0]
+        
+    raise ValueError("DataFrame has no columns to select from.")
+	
 # ----------------------------------------------------------------------------------
 
 def eval_nested_string_literals(data):
@@ -3008,36 +3045,198 @@ def extract_all_table_names(sql_statement):
 
 #----------------------------------------------------------------------------------
 
+def get_all_columns_from_sql(sql_statement):
+    """
+    Extracts all unique column names and aliases referenced in a SQL statement, preserving their order of appearance.
+
+    This function leverages `sqlglot` to parse the SQL statement into an Abstract Syntax Tree (AST), 
+    traversing the tree to identify all explicit column references and wildcard ('*') selections. 
+    For wildcard columns, it resolves the actual column names by querying the Spark catalog for the 
+    relevant table schemas. The function is robust to complex SQL constructs, including common table 
+    expressions (CTEs) and subqueries, and ensures that the returned list contains only unique column 
+    names or aliases, maintaining their original order as encountered in the query.
+
+    Parameters
+    ----------
+    sql_statement : str
+        The SQL query string to be analyzed.
+
+    Returns
+    -------
+    list
+        An ordered list of unique column names and aliases referenced in the SQL statement.
+    """
+    parsed_query = sqlglot.parse_one(sql_statement)
+    all_columns = []
+    seen = set()
+
+    def add_to_list(col_name):
+        """
+        Adds a column name to the result list if it is not None and has not already been added.
+
+        Parameters
+        ----------
+        col_name : str or None
+            The column name or alias to add.
+        """
+        if col_name is not None and col_name not in seen:
+            all_columns.append(col_name)
+            seen.add(col_name)
+
+    def resolve_stars(query_ast):
+        """
+        Resolves 'SELECT *' wildcards within a given AST node by expanding them to actual column names.
+
+        This helper function searches for `Select` expressions containing a `Star` expression. 
+        For each such occurrence, it identifies the base table(s) from the `FROM` clause, 
+        queries the Spark catalog to retrieve the full list of columns for those tables, 
+        and adds them to the result list.
+
+        Parameters
+        ----------
+        query_ast : sqlglot.Expression
+            The AST node to search for wildcard columns.
+        """
+        for select_exp in query_ast.find_all(Select):
+            if any(isinstance(expr, Star) for expr in select_exp.expressions):
+                from_exp = select_exp.args.get('from')
+                if not from_exp:
+                    continue
+                
+                # Recursively find all Table expressions within the FROM clause
+                for table_exp in from_exp.find_all(Table):
+                    # Use .name to get the base table name without aliases
+                    base_table_name = table_exp.name
+                    try:
+                        # Query Spark's catalog for the table schema
+                        df = Config.SPARK_SESSION.table(base_table_name)
+                        for col in df.columns:
+                            add_to_list(col)
+                    except Exception as e:
+                        print(f"Warning: Could not retrieve schema for table '{base_table_name}': {e}")
+    
+    # Handle CTEs first by recursively processing them. This ensures columns from
+    #    'WITH' clauses are resolved before they are referenced in the main query.
+    if isinstance(parsed_query, With):
+        for cte_exp in parsed_query.expressions:
+            for cte in cte_exp:
+                # The body of a CTE is a Select expression; we process it recursively
+                cte_columns = get_all_columns_from_sql(cte.this.sql())
+                for col in cte_columns:
+                    add_to_list(col)
+        # Set the main query to the body of the WITH statement
+        main_query_ast = parsed_query.args['this']
+    else:
+        main_query_ast = parsed_query
+
+    # Process the main query's SELECT list to get final output columns.
+    final_select_exp = main_query_ast.find(Select)
+    if final_select_exp:
+        for expr in final_select_exp.expressions:
+            if isinstance(expr, Star):
+                # If a '*' is found in the final SELECT, resolve it.
+                resolve_stars(final_select_exp)
+            else:
+                # For explicit columns, add their alias or name.
+                add_to_list(expr.alias_or_name)
+
+    # Find and add all other explicit column references from clauses like
+    #    `WHERE`, `JOIN` conditions, `GROUP BY`, etc. This captures columns
+    #    that are used but not part of the final SELECT list.
+    for column_exp in main_query_ast.find_all(sqlglot.expressions.Column):
+        add_to_list(column_exp.name)
+
+    return all_columns
+
+#----------------------------------------------------------------------------------
+
 def handle_duplicate_columns(df):
     """Renames duplicate columns in a DataFrame, postfixing them with a number.
 
-    Args:
-        df (pd.DataFrame or ps.DataFrame): The input DataFrame.
+    Parameters
+    ----------
+        df (ps.DataFrame or pd.DataFrame): The input DataFrame.
 
-    Returns:
-        pd.DataFrame or ps.DataFrame: The DataFrame with unique column names.
+    Returns
+    -------
+        ps.DataFrame or pd.DataFrame: The DataFrame with unique column names, or the original input if None.
     """
-    # Create a dictionary to count occurrences of each column name
+    if df is None:
+        return df
+
     column_count = {}
     new_columns = []
 
     for column in df.columns:
         if column in column_count:
-            # Increment the count and create a new column name with the count
             column_count[column] += 1
             new_column_name = f"{column}_{column_count[column]}"
         else:
-            # Initialize the count for the column
             column_count[column] = 0
             new_column_name = column
-
         new_columns.append(new_column_name)
 
-    # Rename the columns in the DataFrame
+    # Set columns directly 
     df.columns = new_columns
 
     return df
 
+#----------------------------------------------------------------------------------
+
+def convert_to_pyspark_pandas(df):
+    """
+    Convert a DataFrame to a pyspark.pandas DataFrame.
+
+    This function attempts to convert the input DataFrame to a pyspark.pandas DataFrame
+    using the most efficient method available. It supports conversion from Spark DataFrame
+    and pandas DataFrame. If the input is already a pyspark.pandas DataFrame, it is returned as is.
+
+    Parameters
+    ----------
+    df : pyspark.sql.DataFrame or pandas.DataFrame or pyspark.pandas.DataFrame or None
+        The input DataFrame to convert.
+
+    Returns
+    -------
+    pyspark.pandas.DataFrame
+        The converted pyspark.pandas DataFrame, or an empty pyspark.pandas DataFrame
+        if conversion fails or the input is None.
+
+    Examples
+    --------
+    >>> convert_to_pyspark_pandas(spark_df)
+    >>> convert_to_pyspark_pandas(pandas_df)
+    >>> convert_to_pyspark_pandas(None)
+    """
+    if df is None:
+        return ps.DataFrame()
+
+    if isinstance(df, ps.DataFrame):
+        return df
+
+    result_df = None
+    try:
+        if isinstance(df, SparkDataFrame):
+            result_df = df.pandas_api()
+        elif isinstance(df, pd.DataFrame):
+            result_df = ps.from_pandas(df)
+    except Exception as e:
+        warnings.warn(f"Using legacy conversion to pyspark.pandas due to: {e}")
+        try:
+            if isinstance(df, SparkDataFrame):
+                # Fallback to a legacy method (less efficient for large data)
+                result_df = ps.from_pandas(df.toPandas())
+            elif isinstance(df, pd.DataFrame):
+                # Fallback to a legacy method
+                result_df = ps.DataFrame(df)
+        except Exception as e2:
+            warnings.warn(f"Fallback conversion to pyspark.pandas failed: {e2}")
+            # If all conversions fail, return an empty DataFrame
+            return ps.DataFrame()
+    
+    # If a conversion was successful, return the result, otherwise return an empty DataFrame
+    return result_df if result_df is not None else ps.DataFrame()
+	
 #----------------------------------------------------------------------------------
 
 def get_rows_with_condition_spark(sql_statement, error_message, error_level='error'):
@@ -3058,8 +3257,8 @@ def get_rows_with_condition_spark(sql_statement, error_message, error_level='err
     pd.DataFrame
         A DataFrame containing the primary table name, SQL error query, lookup column, and lookup value.
     """
+    results = []
     try:    
-        results = []
 
         # Extract the primary table name from the SQL statement
         primary_table = extract_primary_table(sql_statement)
@@ -3070,36 +3269,22 @@ def get_rows_with_condition_spark(sql_statement, error_message, error_level='err
         missing_tables = [t for t in q_tbls if not Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
         if missing_tables:
             raise ValueError(f"The following tables from {sql_statement} do not exist in the catalog: {missing_tables}")
-            
+
+        # Find all unique columns in the entire query
+        sql_ref_cols = get_all_columns_from_sql(sql_query)
+
         # Get the DataFrame for the primary table
         primary_df = Config.SPARK_SESSION.table(primary_table)
-
-        # Get the best unique ID column from the primary table
-        try:
-            unique_column = get_best_uid_column(primary_df.pandas_api())
-        except:
-            try:
-                unique_column = get_best_uid_column(ps.DataFrame(primary_df))
-            except:
-                unique_column = get_best_uid_column(primary_df.toPandas())
-
-
         # Register the primary table as a temporary view only if it does not exist in Unity Catalog
         if not Config.SPARK_SESSION._jsparkSession.catalog().tableExists(primary_table):
             primary_df.createOrReplaceTempView(primary_table)
                 
         # Execute the modified SQL statement
         spark_result = Config.SPARK_SESSION.sql(sql_statement)
-        try:
-            result_df = spark_result.pandas_api()
-        except:
-            try:
-                result_df = ps.DataFrame(spark_result)
-            except:
-                result_df = spark_result.toPandas()
+        result_df = convert_to_pyspark_pandas(spark_result)
         result_df = handle_duplicate_columns(result_df)
 
-        if len(result_df) == 0:
+        if result_df is None or len(result_df) == 0:
             # Append error information if no rows are returned
             results.append({
                 "Primary_table"     : primary_table,
@@ -3107,28 +3292,37 @@ def get_rows_with_condition_spark(sql_statement, error_message, error_level='err
                 "Message"           : 'OK-No rows returned',
                 "Level"             : 'Good',
                 "Lookup_Column"     : '',
-                "Lookup_Value"      : ''
+                "Lookup_Value"      : '',
+                "Error_Value"       : ''
             })
         else:
+            unique_column = get_best_uid_column(result_df)
             # Prepare the results for each row in the result DataFrame
             for row_index, row in result_df.iterrows():
+                if sql_ref_cols is None:
+                    row_dict_str = str({col: row[col] for col in row.index})
+                else:
+                    row_dict_str = str({col: row[col] for col in sql_ref_cols if col in row.index})
                 results.append({
                     "Primary_table"     : primary_table,
                     "SQL_Error_Query"   : sql_statement,
                     "Message"           : error_message,
                     "Level"             : error_level,
                     "Lookup_Column"     : unique_column,
-                    "Lookup_Value"      : row[unique_column]
+                    "Lookup_Value"      : row[unique_column],
+                    "Error_Value"       : row_dict_str
                 })
     except Exception as e:
         # Append error information if the SQL execution fails
+        print(f'Error executing SQL statement: {primary_table}: /n{sql_statement} /n{str(e)}')
         results.append({
             "Primary_table"     : primary_table,
             "SQL_Error_Query"   : sql_statement,
             "Message"           : f"SQL Query Failed: {str(e)}",
             "Level"             : 'SQL Error',
             "Lookup_Column"     : '',
-            "Lookup_Value"      : ''
+            "Lookup_Value"      : '',
+            "Error_Value"       : ''
         })
 
     return pd.DataFrame(results)
