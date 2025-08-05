@@ -3271,7 +3271,7 @@ def get_rows_with_condition_spark(sql_statement, error_message, error_level='err
             raise ValueError(f"The following tables from {sql_statement} do not exist in the catalog: {missing_tables}")
 
         # Find all unique columns in the entire query
-        sql_ref_cols = get_all_columns_from_sql(sql_query)
+        sql_ref_cols = get_all_columns_from_sql(sql_statement)
 
         # Get the DataFrame for the primary table
         primary_df = Config.SPARK_SESSION.table(primary_table)
