@@ -17,6 +17,7 @@ try:
     import pyspark.pandas as ps             # Library for data manipulation and analysis with Spark
     import pyspark.sql.functions as F
     from pyspark.sql.types import IntegerType, FloatType, StringType, DateType, TimestampType, BooleanType
+    from pyspark.sql.dataframe import DataFrame as SparkDataFrame  # Alias for Spark DataFrame class/type
     from pyspark.sql import SparkSession
     pyspark_available = True
 
@@ -465,7 +466,7 @@ def get_best_uid_column(df, preferred_column=None):
     # Handle different DataFrame types to work with pyspark.pandas API
     if isinstance(df, pd.DataFrame):
         df = ps.from_pandas(df)
-    elif isinstance(df, SparkDataFrame):
+    elif isinstance(df, ):
         df = df.pandas_api()
         
     uniq_counts = {}
@@ -3216,14 +3217,14 @@ def convert_to_pyspark_pandas(df):
 
     result_df = None
     try:
-        if isinstance(df, SparkDataFrame):
+        if isinstance(df, ):
             result_df = df.pandas_api()
         elif isinstance(df, pd.DataFrame):
             result_df = ps.from_pandas(df)
     except Exception as e:
         warnings.warn(f"Using legacy conversion to pyspark.pandas due to: {e}")
         try:
-            if isinstance(df, SparkDataFrame):
+            if isinstance(df, ):
                 # Fallback to a legacy method (less efficient for large data)
                 result_df = ps.from_pandas(df.toPandas())
             elif isinstance(df, pd.DataFrame):
@@ -3272,7 +3273,7 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
             raise ValueError(f"The following tables from {sql_statement} do not exist in the catalog: {missing_tables}")
 
         # Find all unique columns in the entire query
-        sql_ref_cols = get_all_columns_from_sql(sql_query)
+        sql_ref_cols = get_all_columns_from_sql(sql_statement)
                 
         # Execute the modified SQL statement
         spark_result = Config.SPARK_SESSION.sql(sql_statement)
