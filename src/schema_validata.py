@@ -3441,18 +3441,12 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
         sql_statement = row['SQL Error Query']
         sql_ref_tables.append(extract_all_table_names(sql_statement))
 
-        # parser = sql_metadata.Parser(sql_statement)
-        # q_tbls = parser.tables
-        # sql_ref_tables.extend(q_tbls) 
-        
-    #sql_ref_tables = list(set(sql_ref_tables))
-    # print(f'Loading tables: {sql_ref_tables}')
     # Load CSV files into an in-memory if needed
     conn, tables = load_files_to_sql(files, include_tables=sql_ref_tables)
 
     # Iterate over each rule in the rules DataFrame
     for index, row in rules_df.iterrows():
-	primary_table = str(row['Primary Table'])
+        primary_table = str(row['Primary Table'])
         sql_statement = str(row['SQL Error Query'])
         error_level = str(row['Level'])
         error_message = str(row['Message'])
@@ -3460,10 +3454,12 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
         print(f'\nRunning query: \n\t\t{sql_statement}')
         if conn == 'pyspark_pandas':
             # Get rows that meet the condition specified in the SQL statement
-            error_rows = get_rows_with_condition_spark(sql_statement=sql_statement, 
-						       primary_table=primary_table, 
-						       error_message=error_message, 
-						       error_level=error_level
+            error_rows = get_rows_with_condition_spark(
+                sql_statement=sql_statement, 
+                primary_table=primary_table, 
+                error_message=error_message, 
+                error_level=error_level
+            )
         # else:
         #     # Get rows that meet the condition specified in the SQL statement
         #     error_rows = get_rows_with_condition_sqlite(tables, sql_statement, error_message, error_level, conn)
