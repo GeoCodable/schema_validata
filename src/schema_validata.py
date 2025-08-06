@@ -1099,7 +1099,7 @@ def check_all_int(df_col):
 
     Parameters:
     ----------
-    df_col : pandas.Series or numpy.ndarray
+    df_col : pandas.Series or pyspark.pandas.Series
         Column of a DataFrame.
 
     Returns:
@@ -1107,7 +1107,10 @@ def check_all_int(df_col):
     type
         Data type to use for the column.
     """
-    #--------code update start------
+    # Convert pyspark.pandas Series to pandas Series for consistent behavior
+    if 'pyspark.pandas' in str(type(df_col)):
+        df_col = df_col.to_pandas()
+
     # Drop NaNs before type checking
     _s = df_col.dropna()
 
@@ -1120,9 +1123,12 @@ def check_all_int(df_col):
         return bool
 
     try:
-        # Attempt to convert to a nullable integer type. This is the most reliable check.
+        # Attempt to convert to a nullable integer type.
         _s.astype('Int64')
         return 'Int64'
+    except OverflowError:
+        # Handle integers that are too large for a 64-bit integer by treating them as a string.
+        return 'str'
     except (ValueError, TypeError):
         try:
             # If it's not an integer, try converting to a float.
@@ -1131,7 +1137,6 @@ def check_all_int(df_col):
         except (ValueError, TypeError):
             # If all numeric conversions fail, it's a string.
             return str
-    #--------code update end------
 #---------------------------------------------------------------------------------- 
 
 def get_non_null_values(series):
