@@ -465,53 +465,52 @@ def get_best_uid_column(df, preferred_column=None):
     """
     # Handle different DataFrame types to work with pyspark.pandas API
     df = convert_to_pyspark_pandas(df)
-        
-    uniq_counts = {}
+
+    if df.columns.empty:
+        raise ValueError("DataFrame has no columns to select from.")
+
+    # A single pass to classify all columns into their respective tiers
+    uuid_candidates = []
+    int_candidates = []
+    string_candidates = []
+    float_candidates = []
+    
+    total_len = len(df)
+
     for col in df.columns:
         dtype = str(df[col].dtype)
-        
-        # Evaluate integer-like columns. They must be fully unique.
-        if dtype.startswith('int'):
-            unique_vals = df[col].dropna().nunique()
-            total_vals = len(df[col].dropna())
-            if unique_vals == total_vals:
-                uniq_counts[col] = total_vals
-        # Evaluate string columns that can be cast to an integer type.
-        # They also must be fully unique.
-        elif dtype.startswith('string') or dtype == 'object':
-            try:
-                # Attempt to convert all non-null values to int
-                temp_series = df[col].dropna().astype('int64')
-                unique_vals = temp_series.nunique()
-                total_vals = len(df[col].dropna())
-                if unique_vals == total_vals:
-                    uniq_counts[col] = total_vals
-            except (ValueError, TypeError):
-                # If conversion fails, this column is not a string-int UID candidate.
-                # Continue to the next column.
-                continue
-        # For other data types, just count unique non-null values.
-        else:
-            uniq_counts[col] = df[col].dropna().nunique()
-            
-    if uniq_counts:
-        max_count = max(uniq_counts.values())
-        best_columns = [col for col, count in uniq_counts.items() if count == max_count]
-        
-        # Tie-breaking: select the preferred column if it's one of the best.
-        if preferred_column and preferred_column in best_columns:
-            return preferred_column
-        
-        if best_columns:
-            return best_columns[0]
-            
-    # Fallback logic: A column must always be returned.
+        is_unique = df[col].nunique() == total_len
+
+        if dtype in ['string', 'object']:
+            non_null_values = df[col].dropna()
+            # Check for UUID-like strings (36-character length)
+            if not non_null_values.empty and (non_null_values.str.len() == 36).all():
+                if is_unique:
+                    uuid_candidates.append(col)
+            elif is_unique:
+                string_candidates.append(col)
+
+        elif dtype.startswith('int') or check_all_int(df[col]) == 'Int64':
+            if is_unique:
+                int_candidates.append(col)
+
+        elif dtype.startswith('float') or check_all_int(df[col]) == 'Float64':
+            if is_unique:
+                float_candidates.append(col)
+
+    # First Pass: Find a fully unique column based on the priority order
+    for candidates in [uuid_candidates, int_candidates, string_candidates, float_candidates]:
+        if candidates:
+            # Check for a preferred column tie-breaker within this tier
+            if preferred_column and preferred_column in candidates:
+                return preferred_column
+            return candidates[0]
+
+    # Second Pass: If no fully unique column exists, find the most unique one
     if preferred_column and preferred_column in df.columns:
         return preferred_column
     
-    return df.columns[0]
-        
-    raise ValueError("DataFrame has no columns to select from.")
+    return df.nunique().idxmax()
 	
 # ----------------------------------------------------------------------------------
 
