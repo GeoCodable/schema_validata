@@ -645,7 +645,8 @@ def infer_datetime_column(df, column_name):
     # 1. Check for integers that might be Unix timestamps
     if pd.api.types.is_integer_dtype(non_null_values):
         try:
-            converted_series = pd.to_datetime(non_null_values, unit='s')
+            # Use unit='ns' for compatibility
+            converted_series = pd.to_datetime(non_null_values, unit='ns')
             return ps.Series(converted_series) if is_spark_pandas else converted_series
         except:
             return df[column_name] if is_spark_pandas else orig_series
@@ -659,6 +660,7 @@ def infer_datetime_column(df, column_name):
         # 2a. Special case: If the inferred type is 'str' (a long number), try nanoseconds.
         if inferred_type == 'str':
             try:
+                # Use unit='ns' for compatibility
                 converted_series = pd.to_datetime(non_null_values, unit='ns')
                 return ps.Series(converted_series) if is_spark_pandas else converted_series
             except:
@@ -676,7 +678,6 @@ def infer_datetime_column(df, column_name):
             except:
                 pass
         
-        #--------code update start------
         # 4. Now also check for time-only formats from Config.COMMON_TIMESTAMPS.
         for time_format in Config.COMMON_TIMESTAMPS:
             try:
@@ -684,8 +685,7 @@ def infer_datetime_column(df, column_name):
                 return ps.Series(converted_series) if is_spark_pandas else converted_series
             except:
                 pass
-        #--------code update end------
-
+        
         # 5. As a last resort, use flexible parsing.
         try:
             converted_series = non_null_values.apply(dt_parser.parse)
