@@ -1484,12 +1484,13 @@ def get_numeric_range(series,
     return na_val
 
 #----------------------------------------------------------------------------------
+
 def build_data_dictionary(df, 
-                          max_unique_vals=100,
-                          false_val='False',
-                          true_val='True',
-                          na_val=None
-                          ):
+                         max_unique_vals=100,
+                         false_val='False',
+                         true_val='True',
+                         na_val=None
+                         ):
     """
     Creates a detailed data dictionary from a Pandas or Spark DataFrame, 
     capturing key attributes for each column.
@@ -1570,60 +1571,60 @@ def build_data_dictionary(df,
             "length": na_val,
             "range_min": na_val,
             "range_max": na_val,
-            "regex_pattern": na_val,  
+            "regex_pattern": na_val, 
             "unique_value": na_val,
             "allowed_value_list": na_val,
             "required": false_val
-        }  
+        } 
 
         # create column info structure/values (non-null columns)
         if not null_mask.all():
-            _s = df_copy[col][non_null_mask]
-            dups = _s.duplicated(keep=False)
+            _s_filtered = df_copy[col][non_null_mask]
+            
+            dups = _s_filtered.duplicated(keep=False)
             has_nulls = series_hasNull(df_copy[col])
+            
             column_info = {
                 "field_name": col,
-                "data_type": infer_data_types(_s),
+                "data_type": infer_data_types(_s_filtered),
                 "allow_null":  true_val if has_nulls else false_val,
                 "null_count": int(null_mask.sum()),
-                "duplicate_count": _s.duplicated(keep=False).sum(),
+                "duplicate_count": _s_filtered.duplicated(keep=False).sum(),
                 "length": na_val,
-                "range_min": get_numeric_range(_s, 'min', na_val),  
-                "range_max": get_numeric_range(_s, 'max', na_val),
+                "range_min": get_numeric_range(_s_filtered, 'min', na_val),  
+                "range_max": get_numeric_range(_s_filtered, 'max', na_val),
                 "regex_pattern": na_val,
                 "unique_value": true_val if dups.sum() == 0 else false_val,
                 "allowed_value_list": na_val,
                 "required": true_val
             }
 
-            # document allowed values found           
-            if pd.api.types.is_numeric_dtype(_s):
+            # document allowed values found          
+            if pd.api.types.is_numeric_dtype(_s_filtered):
                 try:
                     # try to cast the series as an int 
-                    _s = _s.astype(int)   
+                    _s_filtered = _s_filtered.astype(int)   
                 except:
                     pass 
 
-            if pd.api.types.is_string_dtype(_s) or \
-                pd.api.types.is_categorical_dtype(_s) or \
-                    pd.api.types.is_integer_dtype(_s):  
-                if _s.nunique() <= max_unique_vals: 
-                    if pd.api.types.is_integer_dtype(_s): 
+            if pd.api.types.is_string_dtype(_s_filtered) or \
+                pd.api.types.is_categorical_dtype(_s_filtered) or \
+                    pd.api.types.is_integer_dtype(_s_filtered):  
+                if _s_filtered.nunique() <= max_unique_vals: 
+                    if pd.api.types.is_integer_dtype(_s_filtered): 
                         column_info["allowed_value_list"] = sorted([int(x) 
-                                                                    for x in _s.unique()])  
+                                                                     for x in _s_filtered.unique()]) 
                     else:
-                        column_info["allowed_value_list"] = sorted(_s.astype(str).unique())  
+                        column_info["allowed_value_list"] = sorted(_s_filtered.astype(str).unique())  
 
-            # document max length of values        
+            # document max length of values          
             if column_info["length"] == na_val:
                 try:
-                    # cast the series as a string 
-                    _s = _s.astype(str)
-                    # get the max character length in the value
-                    column_info["length"] = int(_s.str.len().max())
+                    # Fix: Use the filtered series to calculate length
+                    column_info["length"] = int(_s_filtered.astype(str).str.len().max())
                 except:
                     pass
-  
+        
         data_dict[col] = column_info
     return data_dict
 
