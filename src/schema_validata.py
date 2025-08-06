@@ -1095,7 +1095,7 @@ def identify_leading_zeros(df_col):
 def check_all_int(df_col):
     """
     Check if all non-null values in a column can be inferred 
-    as integers or floats.
+    as integers or floats, prioritizing nullable integer types.
 
     Parameters:
     ----------
@@ -1107,23 +1107,31 @@ def check_all_int(df_col):
     type
         Data type to use for the column.
     """
-    if isinstance(df_col, np.ndarray):
-        df_col = pd.Series(df_col)
-
+    #--------code update start------
+    # Drop NaNs before type checking
     _s = df_col.dropna()
-    try:
-        _s = pd.to_numeric(_s)
-    except:
-        pass
 
+    # If the column becomes empty after dropping NaNs, return object
+    if _s.empty:
+        return 'object'
+    
+    # Try to cast to boolean first, as some string representations (e.g., 'TRUE') can be cast to int
     if pd.api.types.is_bool_dtype(_s):
-        return bool      
-    elif pd.api.types.is_numeric_dtype(_s):
-        all_ints = (_s - _s.astype(int) == 0).all()
-        return 'Int64' if all_ints else 'Float64'
-    else:
-        return str
+        return bool
 
+    try:
+        # Attempt to convert to a nullable integer type. This is the most reliable check.
+        _s.astype('Int64')
+        return 'Int64'
+    except (ValueError, TypeError):
+        try:
+            # If it's not an integer, try converting to a float.
+            _s.astype('Float64')
+            return 'Float64'
+        except (ValueError, TypeError):
+            # If all numeric conversions fail, it's a string.
+            return str
+    #--------code update end------
 #---------------------------------------------------------------------------------- 
 
 def get_non_null_values(series):
