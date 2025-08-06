@@ -82,7 +82,7 @@ class Config:
         "required": "object",
         "data_type": "object",
         "allow_null": "object",
-        "length": "int",
+        "length": object",
         "range_min": "float",
         "range_max": "float",
         "regex_pattern": "object",
