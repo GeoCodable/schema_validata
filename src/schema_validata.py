@@ -657,6 +657,12 @@ def infer_datetime_column(df, column_name):
         return df[column_name] if is_spark_pandas else orig_series
 
     if pd.api.types.is_string_dtype(string_column):
+        # Use check_all_int to determine if the column is numeric.
+        # This is a robust check that handles integers, floats, and large IDs.
+        inferred_type = check_all_int(string_column)
+        if inferred_type in ['Int64', 'Float64', 'str']:
+            return df[column_name] if is_spark_pandas else orig_series
+
         try:
             if pd.api.types.is_integer_dtype(pd.to_numeric(string_column)):
                 return df[column_name] if is_spark_pandas else orig_series
@@ -1294,7 +1300,7 @@ def read_df_with_optimal_dtypes(file_path,
         warnings.simplefilter("ignore", RuntimeWarning)  
         try:
             for col in df.columns:
-                df[col] = infer_datetime_column(df, col)
+                df[col] = infer_datetime_column(df, col) 
         except:
             pass  # leave it be
 
@@ -1330,21 +1336,21 @@ def infer_data_types(series):
         dtype = str(non_null_values.dtype)
         if dtype == "bool":
             return "Boolean"
-        elif dtype in ["int8", "int16", "int32", "int64"]:
+        elif dtype in ["int8", "int16", "int32", "int64", "Int64"]:
             return "Integer"
-        elif dtype in ["float16", "float32", "float64"]:
+        elif dtype in ["float16", "float32", "float64", "Float64"]:
             return "Float"
         elif "datetime" in dtype or "date" in dtype:
             return "Datetime"
         elif dtype == "object" or dtype == "string":
-            # Try to infer numeric or datetime
-            try:
-                converted_numeric = non_null_values.astype(float)
-                if (converted_numeric == converted_numeric.astype(int)).all():
-                    return "Integer"
-                else:
-                    return "Float"
-            except:
+            # Use the robust check_all_int function to infer numeric types
+            inferred_type = check_all_int(series)
+            if inferred_type == 'Int64':
+                return "Integer"
+            elif inferred_type == 'Float64':
+                return "Float"
+            # If not a numeric type, then check for datetime
+            else:
                 try:
                     _ = non_null_values.astype("datetime64[ns]")
                     return "Datetime"
