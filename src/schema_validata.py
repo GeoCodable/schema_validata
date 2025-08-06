@@ -631,8 +631,21 @@ def column_is_timestamp(df, column_name, time_format):
 
 def infer_datetime_column(df, column_name):
     """
-    Attempts to convert a pandas or pyspark.pandas column to datetime 
-    type, handling various formats.
+    Attempts to convert a pandas or pyspark.pandas column to a datetime
+    type, handling various formats and edge cases.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame or pyspark.pandas.DataFrame
+        The DataFrame containing the column to be inferred.
+    column_name : str
+        The name of the column to infer and convert.
+
+    Returns
+    -------
+    pandas.Series or pyspark.pandas.Series
+        The converted Series with a datetime type if a match is found.
+        Otherwise, returns the original Series.
     """
     is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
     _s = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
@@ -642,35 +655,34 @@ def infer_datetime_column(df, column_name):
     if non_null_values.empty:
         return df[column_name] if is_spark_pandas else orig_series
 
-    # 1. Check for integers that might be Unix timestamps
+    # Check for integers that might be Unix timestamps.
     if pd.api.types.is_integer_dtype(non_null_values):
         try:
-            # Use unit='ns' for compatibility
             converted_series = pd.to_datetime(non_null_values, unit='ns')
             return ps.Series(converted_series) if is_spark_pandas else converted_series
         except:
             return df[column_name] if is_spark_pandas else orig_series
-    
-    # 2. Check for string or object columns
+
+    # Check for string or object columns.
     if pd.api.types.is_string_dtype(non_null_values) or \
        pd.api.types.is_object_dtype(non_null_values):
-        
+
         inferred_type = check_all_int(non_null_values)
 
-        # 2a. Special case: If the inferred type is 'str' (a long number), try nanoseconds.
+        # Handle the special case of very long numeric strings.
         if inferred_type == 'str':
             try:
-                # Use unit='ns' for compatibility
                 converted_series = pd.to_datetime(non_null_values, unit='ns')
                 return ps.Series(converted_series) if is_spark_pandas else converted_series
             except:
                 return df[column_name] if is_spark_pandas else orig_series
-        
-        # 2b. If the inferred type is a standard int or float, it's a numeric ID, not a date.
+
+        # This is the numeric guardrail. If it's a standard numeric string,
+        # it is not a datetime, so we return the original series.
         if inferred_type in ['Int64', 'Float64']:
             return df[column_name] if is_spark_pandas else orig_series
 
-        # 3. If it's not numeric, then attempt datetime parsing using Config.COMMON_DATETIMES.
+        # If the column is a string and not numeric, check for specific datetime formats.
         for date_format in Config.COMMON_DATETIMES:
             try:
                 converted_series = pd.to_datetime(non_null_values, format=date_format)
@@ -678,20 +690,13 @@ def infer_datetime_column(df, column_name):
             except:
                 pass
         
-        # 4. Now also check for time-only formats from Config.COMMON_TIMESTAMPS.
+        # Check for time-only formats.
         for time_format in Config.COMMON_TIMESTAMPS:
             try:
                 converted_series = pd.to_datetime(non_null_values, format=time_format)
                 return ps.Series(converted_series) if is_spark_pandas else converted_series
             except:
                 pass
-        
-        # 5. As a last resort, use flexible parsing.
-        try:
-            converted_series = non_null_values.apply(dt_parser.parse)
-            return ps.Series(converted_series) if is_spark_pandas else converted_series
-        except:
-            pass
 
     return df[column_name] if is_spark_pandas else orig_series
 
