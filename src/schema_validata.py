@@ -1378,7 +1378,10 @@ def infer_data_types(series):
 		series_for_processing = series
 	else:
 		series_for_processing = series
-
+		
+	# if the returned series has a datetime type
+		if "datetime" in str(series.dtype) or "date" in str(series.dtype):
+			return "Datetime"
 	non_null_values = series_for_processing.dropna()
 
 	if non_null_values.count() == 0:
