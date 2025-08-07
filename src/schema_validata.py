@@ -2050,57 +2050,53 @@ def schema_validate_unique(attribute, p_errors):
     return None
 
 #----------------------------------------------------------------------------------
-def schema_validate_range(attribute, 
-                          p_errors,
-                          msg_vals
-                          ):
+
+def schema_validate_range(attribute, p_errors):
     """
-    Checks if a numeric value for a given attribute falls within the expected range.
+    Checks if the observed range (min and max) of a column falls within 
+    the expected range.
 
     Parameters:
     ----------
-    attribute (str):
-        The name of the attribute to check.
-    p_errors (dict):
-        A dictionary containing potential errors, where keys are attribute names
-        and values are dictionaries with 'expected' and 'observed' values.
-    msg_vals (dict):
-        A dictionary to store values for error message formatting.
+    attribute (str): The name of the attribute to check.
+    p_errors (dict): A dictionary containing potential errors, where keys 
+                     are attribute names and values are dictionaries with 
+                     'expected' and 'observed' values.
 
     Returns:
     -------
-    str or None:
-        Returns the attribute name if the value is outside the expected range,
-        indicating an error. Returns None if the value is within the range.
+    str or None: Returns the attribute name if an inequality is found, 
+                 indicating an error. Returns None if the values match.
     """
+    # ------code update start-------
+    # retrieve expected and observed range values, which might be None
+    exp_min_val = p_errors[attribute].get('expected', {}).get('range_min')
+    exp_max_val = p_errors[attribute].get('expected', {}).get('range_max')
+    
+    obs_min_val = p_errors[attribute].get('observed', {}).get('range_min')
+    obs_max_val = p_errors[attribute].get('observed', {}).get('range_max')
 
-    # Check if the expected range is a numeric value
-    if is_numeric_type(p_errors[attribute]['expected']):
-        # Check if the observed value is also a numeric value
-        if is_numeric_type(p_errors[attribute]['observed']):
-            exp_val = p_errors[attribute]['expected']
-            obs_val = p_errors[attribute]['observed']
+    # If no expected range is defined, there's no error to report.
+    if exp_min_val is None and exp_max_val is None:
+        return None
 
-            # Logic to determine when errors are flagged based on the attribute
-            rng_logic = {
-                'length': lambda expected, observed: expected < observed,
-                'range_max': lambda expected, observed: expected < observed,
-                'range_min': lambda expected, observed: expected > observed,
-            }
-
-            # Check if the observed value falls outside the expected range
-            if rng_logic[attribute](exp_val, obs_val):
-                # Store values for error message formatting
-                msg_vals["expected"] = int(exp_val) if int(exp_val) == exp_val else exp_val
-                msg_vals["observed"] = int(obs_val) if int(obs_val) == obs_val else obs_val
-                return attribute
-            else:
-                # Update status and errors in case of data type mismatch
-                p_errors[attribute]['status'] = 'Fail'
-                p_errors[attribute]['errors'] = (
-                    f'Data Type Error: Unable to validate {attribute}, check data types'
-                )
-
+    try:
+        # Attempt to cast the values to a comparable numeric type.
+        # This handles cases where a float or string representation is present.
+        exp_min = float(exp_min_val) if exp_min_val is not None else -np.inf
+        exp_max = float(exp_max_val) if exp_max_val is not None else np.inf
+        
+        obs_min = float(obs_min_val) if obs_min_val is not None else np.inf
+        obs_max = float(obs_max_val) if obs_max_val is not None else -np.inf
+        
+        # Now, perform the validation logic on numeric values.
+        if obs_min < exp_min or obs_max > exp_max:
+            return attribute
+    except (ValueError, TypeError):
+        # If casting fails due to a non-numeric value, it's a mismatch.
+        return attribute
+    
+    # ------code update end-------
     return None
 
 #---------------------------------------------------------------------------------- 
@@ -2159,10 +2155,10 @@ def schema_validate_allowed_values(attribute,
 #---------------------------------------------------------------------------------- 
 
 def schema_validate_attribute(attribute,
-                              p_errors,
-                              col,
-                              msg_vals
-                              ):
+                             p_errors,
+                             col,
+                             msg_vals
+                             ):
     """
     Validates specific schema attributes and returns the error type if applicable.
 
@@ -2184,29 +2180,31 @@ def schema_validate_attribute(attribute,
         Returns the error type if a violation is found for the attribute.
         Returns None if no errors are detected for the attribute.
     """
-    # Attributes to test if expected numeric value is within a range    
-    range_checks = ['length', 'range_max', 'range_min']
-
+    # ------code update start-------
+    # The redundant 'range_checks' list has been removed.
+    # The logic is now a simple dispatcher to the correct validation function.
     if attribute == 'data_type':
         # Validate data type
-        return schema_validate_column_types(attribute, p_errors)        
+        return schema_validate_column_types(attribute, p_errors)
     elif attribute == 'allow_null':
         # Validate if null values are allowed
         return schema_validate_allow_null(attribute, p_errors)
     elif attribute == 'length':
         # Validate maximum string length
         return schema_validate_column_length(attribute, p_errors)
+    elif attribute in ['range_max', 'range_min']:
+        # Validate if a numeric value falls within the expected range
+        return schema_validate_range(attribute, p_errors, msg_vals)
     elif attribute == 'unique_value':
         # Validate if column values are supposed to be unique
         return schema_validate_unique(attribute, p_errors)
     elif attribute == 'allowed_value_list':
         # Validate if observed values are within the allowed list
-        return schema_validate_allowed_values(attribute, p_errors, msg_vals)        
-    elif attribute in range_checks:
-        # Validate if a numeric value falls within the expected range
-        return schema_validate_range(attribute, p_errors, msg_vals)
+        return schema_validate_allowed_values(attribute, p_errors, msg_vals)
 
-    return None  # No error found for this attribute
+    return None
+    # ------code update end-------
+
 
 #---------------------------------------------------------------------------------- 
 
