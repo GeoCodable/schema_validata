@@ -1336,10 +1336,14 @@ def infer_data_types(series):
 		"Null-Unknown", "Boolean", "Integer", "Float", 
 		"Datetime", "String", or "Other".
 	"""
-	if not isinstance(series, ps.Series):
-		series = ps.from_pandas(series)
+	is_spark_pandas = isinstance(series, ps.Series)
+	
+	if is_spark_pandas:
+		series_for_processing = series
+	else:
+		series_for_processing = series
 
-	non_null_values = series.dropna()
+	non_null_values = series_for_processing.dropna()
 
 	if non_null_values.count() == 0:
 		return "Null-Unknown"
@@ -1355,22 +1359,31 @@ def infer_data_types(series):
 			return "Datetime"
 		elif dtype == "object" or dtype == "string":
 			# Use the robust check_all_int function to infer numeric types
-			inferred_type = check_all_int(series)
+			inferred_type = check_all_int(series_for_processing)
 			if inferred_type == 'Int64':
 				return "Integer"
 			elif inferred_type == 'Float64':
 				return "Float"
 			# If not a numeric type, then check for datetime using a robust check
 			else:
-				# We can create a dummy df for the infer_datetime_column function as it's not a helper.
-				df_temp = ps.DataFrame({series.name: series})
-				if infer_datetime_column(df_temp, series.name) is not None:
+				# Create a dummy df for the infer_datetime_column function.
+				if is_spark_pandas:
+					df_temp = series_for_processing.to_frame()
+				else:
+					df_temp = pd.DataFrame({series_for_processing.name: series_for_processing})
+				
+				# Call infer_datetime_column and get the returned series
+				result_series = infer_datetime_column(df_temp, series_for_processing.name)
+
+				# Check if the returned series has a datetime type
+				if "datetime" in str(result_series.dtype) or "date" in str(result_series.dtype):
 					return "Datetime"
 				# Otherwise, the type is a String.
 				else:
 					return "String"
 		else:
 			return "Other"
+			
 #---------------------------------------------------------------------------------- 
 
 def check_na_value(value, 
