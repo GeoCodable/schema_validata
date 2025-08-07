@@ -2051,52 +2051,58 @@ def schema_validate_unique(attribute, p_errors):
 
 #----------------------------------------------------------------------------------
 
-def schema_validate_range(attribute, p_errors):
+import numbers
+
+def schema_validate_range(attribute,
+                          p_errors,
+                          msg_vals
+                          ):
     """
-    Checks if the observed range (min and max) of a column falls within 
-    the expected range.
+    Checks if a numeric value for a given attribute falls within the expected range.
 
     Parameters:
     ----------
-    attribute (str): The name of the attribute to check.
-    p_errors (dict): A dictionary containing potential errors, where keys 
-                     are attribute names and values are dictionaries with 
-                     'expected' and 'observed' values.
+    attribute (str):
+        The name of the attribute to check.
+    p_errors (dict):
+        A dictionary containing potential errors, where keys are attribute names
+        and values are dictionaries with 'expected' and 'observed' values.
+    msg_vals (dict):
+        A dictionary to store values for error message formatting.
 
     Returns:
     -------
-    str or None: Returns the attribute name if an inequality is found, 
-                 indicating an error. Returns None if the values match.
+    str or None:
+        Returns the attribute name if the value is outside the expected range,
+        indicating an error. Returns None if the value is within the range.
     """
-    # ------code update start-------
-    # retrieve expected and observed range values, which might be None
-    exp_min_val = p_errors[attribute].get('expected', {}).get('range_min')
-    exp_max_val = p_errors[attribute].get('expected', {}).get('range_max')
-    
-    obs_min_val = p_errors[attribute].get('observed', {}).get('range_min')
-    obs_max_val = p_errors[attribute].get('observed', {}).get('range_max')
-
-    # If no expected range is defined, there's no error to report.
-    if exp_min_val is None and exp_max_val is None:
-        return None
-
-    try:
-        # Attempt to cast the values to a comparable numeric type.
-        # This handles cases where a float or string representation is present.
-        exp_min = float(exp_min_val) if exp_min_val is not None else -np.inf
-        exp_max = float(exp_max_val) if exp_max_val is not None else np.inf
+    # Check if both expected and observed values are numeric.
+    # The helper function 'is_numeric_type' is assumed to be defined elsewhere.
+    if is_numeric_type(p_errors[attribute]['expected']) and \
+       is_numeric_type(p_errors[attribute]['observed']):
         
-        obs_min = float(obs_min_val) if obs_min_val is not None else np.inf
-        obs_max = float(obs_max_val) if obs_max_val is not None else -np.inf
-        
-        # Now, perform the validation logic on numeric values.
-        if obs_min < exp_min or obs_max > exp_max:
+        exp_val = p_errors[attribute]['expected']
+        obs_val = p_errors[attribute]['observed']
+
+        # This dictionary defines the validation logic for each attribute.
+        # It uses lambda functions to perform a specific comparison.
+        rng_logic = {
+            # Flags an error if the observed length is greater than the expected.
+            'length': lambda expected, observed: expected < observed,
+            # Flags an error if the observed value is greater than the maximum allowed.
+            'range_max': lambda expected, observed: expected < observed,
+            # Flags an error if the observed value is less than the minimum allowed.
+            'range_min': lambda expected, observed: expected > observed,
+        }
+
+        # Check if the observed value falls outside the expected range
+        if rng_logic[attribute](exp_val, obs_val):
+            # Store values for error message formatting
+            msg_vals["expected"] = int(exp_val) if int(exp_val) == exp_val else exp_val
+            msg_vals["observed"] = int(obs_val) if int(obs_val) == obs_val else obs_val
             return attribute
-    except (ValueError, TypeError):
-        # If casting fails due to a non-numeric value, it's a mismatch.
-        return attribute
     
-    # ------code update end-------
+    # If the value is not out of range, the function returns None.
     return None
 
 #---------------------------------------------------------------------------------- 
