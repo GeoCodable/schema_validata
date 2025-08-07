@@ -3571,15 +3571,13 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
                 error_message=error_message, 
                 error_level=error_level
             )
-			if not error_rows.empty:
-	            errors_df = pd.concat([errors_df, error_rows], ignore_index=True)
         # else:
         #     # Get rows that meet the condition specified in the SQL statement
         #     error_rows = get_rows_with_condition_sqlite(tables, sql_statement, error_message, error_level, conn)
 
         # If there are any error rows, concatenate them to the errors DataFrame
-        # if not error_rows.empty:
-        #     errors_df = pd.concat([errors_df, error_rows], ignore_index=True)
+        if not error_rows.empty:
+            errors_df = pd.concat([errors_df, error_rows], ignore_index=True)
 
     return errors_df
 
