@@ -1310,26 +1310,29 @@ def read_df_with_optimal_dtypes(file_path,
 			# Fallback to the pandas-only inference logic if Spark fails.
 			Config.USE_PYSPARK = False # Temporarily disable to force pandas path
 	
-	if not Config.USE_PYSPARK:
-		# Existing pandas-based logic for building the dtypes dictionary.
-		# This is the code that will run if Spark is not enabled or if the Spark read fails.
-		df = read_spreadsheet_with_params(file_path, sheet_name, str, read_as_na)
+
+	# Existing pandas-based logic for building the dtypes dictionary.
+	# This is the code that will run if Spark is not enabled or if the Spark read fails.
+	df = read_spreadsheet_with_params(file_path, sheet_name, str, read_as_na)
+	
+	for col in df.columns:
+		#if spark determined it is a datatime, reatin it 
+		if dtypes.get(col) = 'datetime64[ns]':
+			continue
+		non_null_values = get_non_null_values(df[col])
 		
-		for col in df.columns:
-			non_null_values = get_non_null_values(df[col])
-			
-			if len(non_null_values) == 0:
-				dtypes[col] = object
-			elif identify_leading_zeros(non_null_values):
-				dtypes[col] = str
-			elif pd.api.types.is_bool_dtype(non_null_values):
-				dtypes[col] = bool
-			elif pd.api.types.is_numeric_dtype(non_null_values):
-				dtypes[col] = check_all_int(non_null_values)
-			elif pd.api.types.is_string_dtype(non_null_values) or pd.api.types.is_categorical_dtype(non_null_values):
-				dtypes[col] = check_all_int(non_null_values)
-			else:
-				dtypes[col] = str
+		if len(non_null_values) == 0:
+			dtypes[col] = object
+		elif identify_leading_zeros(non_null_values):
+			dtypes[col] = str
+		elif pd.api.types.is_bool_dtype(non_null_values):
+			dtypes[col] = bool
+		elif pd.api.types.is_numeric_dtype(non_null_values):
+			dtypes[col] = check_all_int(non_null_values)
+		elif pd.api.types.is_string_dtype(non_null_values) or pd.api.types.is_categorical_dtype(non_null_values):
+			dtypes[col] = check_all_int(non_null_values)
+		else:
+			dtypes[col] = str
 
 	# --- STAGE 3: FINAL READ WITH INFERRED DTYPES ---
 	# Read the data one last time with the complete dtypes dictionary.
