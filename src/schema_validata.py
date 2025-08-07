@@ -639,8 +639,6 @@ def column_is_timestamp(df, column_name, time_format):
 
 # ----------------------------------------------------------------------------------
 
-from dateutil import parser as dt_parser
-
 def infer_datetime_column(df, column_name):
 	"""
 	Attempts to convert a pandas or pyspark.pandas column to a datetime
@@ -655,61 +653,65 @@ def infer_datetime_column(df, column_name):
 		return df[column_name] if is_spark_pandas else orig_series
 
 	# Define a threshold for successful conversion to avoid false positives.
-	# This requires at least 80% of non-null values to be valid dates.
-	conversion_threshold = 0.8
+	conversion_threshold = 0.98
 
-	# Handle numeric columns that might be Excel serial dates.
+	# handle numeric Excel serial dates ---
 	if pd.api.types.is_numeric_dtype(series_for_processing):
 		non_null_count = series_for_processing.dropna().count()
 		
-		# Only proceed if there are values to check.
 		if non_null_count > 0:
-			# Use a guardrail to check if the numbers are within a plausible date range.
 			is_plausible_date = (series_for_processing > 1).all() and (series_for_processing < 100000).all()
 
 			if is_plausible_date:
 				try:
-					# Convert the numeric series to a datetime object, assuming an Excel origin.
 					converted_series = pd.to_datetime(series_for_processing,
 						origin='1899-12-30',
 						unit='D',
 						errors='coerce')
 					
-					# Compare the count of successfully converted dates to the original non-null count.
 					successfully_converted_count = converted_series.dropna().count()
 					if successfully_converted_count / non_null_count >= conversion_threshold:
 						return ps.Series(converted_series) if is_spark_pandas else converted_series
 				except Exception:
-					pass # Conversion failed, so proceed to the next checks.
+					pass
 
-	# Handle string columns using a flexible date parser.
+	# handle string-based dates with a multi-stage approach ---
 	elif pd.api.types.is_string_dtype(series_for_processing):
 		non_null_values = series_for_processing.dropna()
 		non_null_count = non_null_values.count()
 		
-		# Only proceed if there are values to check.
 		if non_null_count > 0:
-			# The check_all_int function is still useful here to prevent parsing
-			# columns of pure numbers that are not dates as strings.
+			# Re-check against common numeric string patterns before proceeding.
 			inferred_type = check_all_int(non_null_values)
 			if inferred_type not in ['str', 'object']:
 				return df[column_name] if is_spark_pandas else orig_series
+			
+			# Attempt conversion using predefined formats
+			common_formats = Config.COMMON_DATES + Config.COMMON_DATETIMES 
+			for fmt in common_formats:
+				try:
+					# Use pd.to_datetime with the specific format
+					converted_series = pd.to_datetime(non_null_values, format=fmt, errors='raise')
+					
+					successfully_converted_count = converted_series.dropna().count()
+					if successfully_converted_count / non_null_count >= conversion_threshold:
+						combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
+						combined_series.loc[converted_series.index] = converted_series
+						return ps.Series(combined_series) if is_spark_pandas else combined_series
+				except (ValueError, TypeError):
+					continue # Try the next format
 
+			# Use the flexible dateutil parser for any other format
 			def try_dateutil_parser(x):
 				try:
-					# Use dateutil.parser to parse a wide variety of date strings.
 					return dt_parser.parse(x)
 				except (ValueError, TypeError):
 					return None
 
-			# Apply the flexible parser to the non-null series.
 			converted_series = non_null_values.apply(try_dateutil_parser)
-
-			# Combine the converted series with the original nulls.
 			combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
 			combined_series.loc[converted_series.index] = converted_series
 
-			# Compare the count of successfully converted dates to the original non-null count.
 			successfully_converted_count = combined_series.dropna().count()
 			if successfully_converted_count / non_null_count >= conversion_threshold:
 				return ps.Series(combined_series) if is_spark_pandas else combined_series
@@ -3412,6 +3414,7 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
                     "Lookup_Value": row[unique_column],
                     "Error_Value": row_dict_str
                 })
+				
     except Exception as e:
         # Append error information if the SQL execution fails
         results.append({
@@ -3569,13 +3572,15 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
                 error_message=error_message, 
                 error_level=error_level
             )
+			if not error_rows.empty:
+	            errors_df = pd.concat([errors_df, error_rows], ignore_index=True)
         # else:
         #     # Get rows that meet the condition specified in the SQL statement
         #     error_rows = get_rows_with_condition_sqlite(tables, sql_statement, error_message, error_level, conn)
 
         # If there are any error rows, concatenate them to the errors DataFrame
-        if not error_rows.empty:
-            errors_df = pd.concat([errors_df, error_rows], ignore_index=True)
+        # if not error_rows.empty:
+        #     errors_df = pd.concat([errors_df, error_rows], ignore_index=True)
 
     return errors_df
 
