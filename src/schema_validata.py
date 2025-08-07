@@ -416,8 +416,8 @@ def downcast_ints(value):
 	Downcast a numeric value to an integer if it is equal to 
 	a float representation.
 	
-	Parameters
-	----------
+    Parameters
+    ----------
 	value: The numeric value to downcast.
 	
 	Returns
@@ -425,12 +425,22 @@ def downcast_ints(value):
 	The value as an integer if it is equal to its float 
 	representation, otherwise the original value.
 	"""
-	try:
-		if isinstance(value, float) and int(value) == float(value):
-			return int(value)
-	except ValueError:
-		pass
-	return value
+    # Try to downcast a scalar value using pandas' to_numeric with downcast options
+    try:
+        # Check if value is numeric
+        if not pd.api.types.is_number(value):
+            return value
+        # Try integer downcast
+        int_downcast = pd.to_numeric([value], downcast='integer')
+        if not pd.isnull(int_downcast[0]) and int_downcast[0] == value:
+            return int_downcast[0]
+        # Try float downcast
+        float_downcast = pd.to_numeric([value], downcast='float')
+        if not pd.isnull(float_downcast[0]) and float_downcast[0] == value:
+            return float_downcast[0]
+    except Exception:
+        pass
+    return value
 
 # ----------------------------------------------------------------------------------
 
@@ -1882,19 +1892,18 @@ def get_dict_diffs(dict1, dict2):
                 mismatches[key] = {"expected": value, "observed": dict2[key]}
         else:
             try:
-                # Try to cast to downcast as int and and compare
-                obs_downcast = downcast_ints(value)
-                exp_downcast = downcast_ints(dict2[key])
+                # Try to cast to ints
+                value = downcast_ints(value)
+                dict2[key] = downcast_ints(dict2[key])
 
                 # Attempt casting dict2[key] to the datatype of value
-                if type(obs_downcast)(obs_downcast) != obs_downcast:
-                    mismatches[key] = {"expected": obs_downcast, "observed": obs_downcast}
+                if type(value)(dict2[key]) != value:
+                    mismatches[key] = {"expected": value, "observed": dict2[key]}
             except (ValueError, TypeError):
                 # If casting fails, consider it a mismatch
                 mismatches[key] = {"expected": value, "observed": dict2[key]}
 
     return mismatches
-
 #---------------------------------------------------------------------------------- 
 
 def schema_validate_column_types(attribute, p_errors):
