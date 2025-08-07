@@ -3375,7 +3375,7 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
                 })
     except Exception as e:
         # Append error information if the SQL execution fails
-        print(f'Error executing SQL statement: {primary_table}: \n{sql_statement'}
+        print(f'Error executing SQL statement: {primary_table}: \n{sql_statement}')
 #---------------------------------------------------------------------------------- 
 
 # def get_rows_with_condition_sqlite(tables, sql_statement, conn, error_message, error_level='error'):
