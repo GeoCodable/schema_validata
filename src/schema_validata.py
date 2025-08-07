@@ -3323,10 +3323,8 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
         DataFrame with columns: Primary_table, SQL_Error_Query, Message, Level, Lookup_Column, Lookup_Value, Error_Value.
     """
     # remove extra spaces and hidden chars
-    # Use a single, comprehensive regex to handle all unwanted characters
-    # and replace them with a single space to avoid concatenation issues.
-    cleaned_sql = re.sub(r'[\s\x00-\x1F\x7F\u200B\uFEFF\xa0]+', ' ', sql_statement.strip())
-    sql_statement = cleaned_sql
+    sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
+    sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
 
     results = []
     try:
@@ -3377,7 +3375,7 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
                 })
     except Exception as e:
         # Append error information if the SQL execution fails
-        print(f'Error executing SQL statement: {primary_table}: \n{sql_statement}
+        print(f'Error executing SQL statement: {primary_table}: \n{sql_statement'}
 #---------------------------------------------------------------------------------- 
 
 # def get_rows_with_condition_sqlite(tables, sql_statement, conn, error_message, error_level='error'):
