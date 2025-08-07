@@ -1309,8 +1309,7 @@ def read_df_with_optimal_dtypes(file_path,
 					dtypes[col] = str
 					
 		except Exception:
-			# Fallback to the pandas-only inference logic if Spark fails.
-			Config.USE_PYSPARK = False # Temporarily disable to force pandas path
+			pass
 	
 
 	# Existing pandas-based logic for building the dtypes dictionary.
