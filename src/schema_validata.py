@@ -3375,7 +3375,16 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
                 })
     except Exception as e:
         # Append error information if the SQL execution fails
-        print(f'Error executing SQL statement: {primary_table}: \n{sql_statement}')
+        results.append({
+            "Primary_table"     : primary_table,
+            "SQL_Error_Query"   : sql_statement,
+            "Message"           : f"SQL Query Failed: {str(e)}",
+            "Level"             : 'SQL Error',
+            "Lookup_Column"     : '',
+            "Lookup_Value"      : ''
+        })
+
+    return pd.DataFrame(results)
 #---------------------------------------------------------------------------------- 
 
 # def get_rows_with_condition_sqlite(tables, sql_statement, conn, error_message, error_level='error'):
