@@ -1230,114 +1230,126 @@ def read_spreadsheet_with_params(file_path,
 #----------------------------------------------------------------------------------
 
 def read_df_with_optimal_dtypes(file_path,
-                                sheet_name=None,
-                                rm_newlines=True, 
-                                replace_char='',
-                                na_values=Config.NA_VALUES,
-                                na_patterns=Config.NA_PATTERNS):
-    """
-    Infers optimal data types for a DataFrame or read, preserving 
-    the best datatype for each column including leading zeros,
-    boolean, strings, dates, ints, floats, etc.
+                                 sheet_name=None,
+                                 rm_newlines=True,
+                                 replace_char='',
+                                 na_values=Config.NA_VALUES,
+                                 na_patterns=Config.NA_PATTERNS):
+	"""
+	Infers optimal data types for a DataFrame or read, preserving
+	the best datatype for each column including leading zeros,
+	boolean, strings, dates, ints, floats, etc.
 
-    Parameters
-    ----------
-    file_path (str):
-        File path to the CSV, XLSX, or XLS file.    
-    sheet_name (str, optional): 
-        The name of the sheet to read from an Excel file 
-        (default: None, reads the first sheet).    
-    rm_newlines (bool, optional): 
-        If True, removes newline characters from the data 
-        (default: True).
-    replace_char (str, optional): 
-        The character to replace newline characters with 
-        (default: empty string "").
-    na_values: (Optional) 
-        List of values to consider nulls in addition to standard nulls. 
-        (default: None)
-    na_patterns: (Optional) 
-        List of regular expressions to identify strings representing missing values. 
-        (default: None)
-        
-    Returns
-    -------
-    df (pandas.DataFrame or pyspark.pandas.DataFrame): 
-        A DataFrame with inferred data types.
-    """
-    # Initialize empty data type dictionary
-    dtypes = {}
+	Parameters
+	----------
+	file_path (str):
+		File path to the CSV, XLSX, or XLS file.
+	sheet_name (str, optional):
+		The name of the sheet to read from an Excel file
+		(default: None, reads the first sheet).
+	rm_newlines (bool, optional):
+		If True, removes newline characters from the data
+		(default: True).
+	replace_char (str, optional):
+		The character to replace newline characters with
+		(default: empty string "").
+	na_values: (Optional)
+		List of values to consider nulls in addition to standard nulls.
+		(default: None)
+	na_patterns: (Optional)
+		List of regular expressions to identify strings representing missing values.
+		(default: None)
+		
+	Returns
+	-------
+	df (pandas.DataFrame or pyspark.pandas.DataFrame):
+		A DataFrame with inferred data types.
+	"""
+	# Initialize empty data type dictionary
+	dtypes = {}
 
-    # if Config.USE_PYSPARK:
-    #     file_path = to_dbfs_path(file_path)
-    # else:
-    file_path = db_path_to_local(file_path)
+	# Use the appropriate path conversion
+	if Config.USE_PYSPARK:
+		file_path = to_dbfs_path(file_path)
+	else:
+		file_path = db_path_to_local(file_path)
+	
+	# --- STAGE 1: READ TO FIND NULLS ---
+	# Read the sheet without specifying initial data types to find nulls
+	df = read_spreadsheet_with_params(file_path, sheet_name, str, na_values)
 
-    # Read the sheet without specifying initial data types   
-    df = read_spreadsheet_with_params(file_path, sheet_name, str, na_values)
- 
-    # Identify any null patterns as nulls and add the observed values to the na_values
-    read_as_na = na_values.copy()
+	read_as_na = na_values.copy()
+	for col in df.columns:
+		null_p_vals = [v for v in df[col].unique().tolist()
+						if check_na_value(v,
+							na_values=na_values,
+							na_patterns=na_patterns)
+						and not pd.isna(v)]
+		if null_p_vals:
+			read_as_na.extend(list(set(null_p_vals)))
+	read_as_na = list(set(read_as_na))
+	
+	# --- STAGE 2: BUILD DTYPES DICTIONARY ---
+	if Config.USE_PYSPARK:
+		# Use Spark to infer dtypes. We'll use this to get our datetime columns.
+		try:
+			# Assume spark_read_spreadsheet is a function that reads a file into a Spark DataFrame.
+			spark_df = spark_read_spreadsheet(file_path, sheet_name=sheet_name, na_values=read_as_na)
+			
+			for col in spark_df.columns:
+				spark_dtype = spark_df.schema[col].dataType.simpleString()
+				
+				# If Spark inferred a date or timestamp, use that dtype.
+				if 'timestamp' in spark_dtype or 'date' in spark_dtype:
+					dtypes[col] = 'datetime64[ns]'
+				else:
+					# Otherwise, default to string for the final read to use your custom logic.
+					dtypes[col] = str
+					
+		except Exception:
+			# Fallback to the pandas-only inference logic if Spark fails.
+			Config.USE_PYSPARK = False # Temporarily disable to force pandas path
+	
+	if not Config.USE_PYSPARK:
+		# Existing pandas-based logic for building the dtypes dictionary.
+		# This is the code that will run if Spark is not enabled or if the Spark read fails.
+		df = read_spreadsheet_with_params(file_path, sheet_name, str, read_as_na)
+		
+		for col in df.columns:
+			non_null_values = get_non_null_values(df[col])
+			
+			if len(non_null_values) == 0:
+				dtypes[col] = object
+			elif identify_leading_zeros(non_null_values):
+				dtypes[col] = str
+			elif pd.api.types.is_bool_dtype(non_null_values):
+				dtypes[col] = bool
+			elif pd.api.types.is_numeric_dtype(non_null_values):
+				dtypes[col] = check_all_int(non_null_values)
+			elif pd.api.types.is_string_dtype(non_null_values) or pd.api.types.is_categorical_dtype(non_null_values):
+				dtypes[col] = check_all_int(non_null_values)
+			else:
+				dtypes[col] = str
 
-    for col in df.columns:
-        null_p_vals = [v for v in df[col].unique().tolist()
-                       if check_na_value(v, 
-                                         na_values=na_values, 
-                                         na_patterns=na_patterns)
-                       and not pd.isna(v)] 
+	# --- STAGE 3: FINAL READ WITH INFERRED DTYPES ---
+	# Read the data one last time with the complete dtypes dictionary.
+	df = read_spreadsheet_with_params(file_path,
+		sheet_name,
+		dtypes,
+		read_as_na)
+	
+	# The datetime inference loop is now a fallback, not the primary method.
+	with warnings.catch_warnings():
+		warnings.simplefilter("ignore", RuntimeWarning)
+		try:
+			for col in df.columns:
+				# Only attempt datetime inference if the column is a string
+				if pd.api.types.is_string_dtype(df[col]):
+					df[col] = infer_datetime_column(df, col)
+		except:
+			pass # leave it be
 
-        if null_p_vals:
-            read_as_na.extend(list(set(null_p_vals)))
-
-    read_as_na = list(set(read_as_na))
-
-    # Re-read the sheet with updated na_values
-    df = read_spreadsheet_with_params(file_path, 
-                                      sheet_name, 
-                                      str, 
-                                      read_as_na)
-
-    # Identify potential leading zeros for each column
-    # is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
-    for col in df.columns:
-        non_null_values = get_non_null_values(df[col])
-
-        
-        # if is_spark_pandas:
-        #     non_null_values = non_null_values.to_numpy()
-
-        if len(non_null_values) == 0:
-            dtypes[col] = object
-        elif identify_leading_zeros(non_null_values):
-            dtypes[col] = str  # Preserve leading zeros
-        elif pd.api.types.is_bool_dtype(non_null_values):
-            dtypes[col] = bool           
-        elif pd.api.types.is_numeric_dtype(non_null_values):
-            dtypes[col] = check_all_int(non_null_values)
-        elif pd.api.types.is_string_dtype(non_null_values) or \
-             pd.api.types.is_categorical_dtype(non_null_values):
-            dtypes[col] = check_all_int(non_null_values)
-        else:
-            dtypes[col] = str             
-                
-    # Read the data again with the defined data types
-    df = read_spreadsheet_with_params(file_path, 
-                                      sheet_name, 
-                                      dtypes, 
-                                      read_as_na)
-    
-    # Attempt to convert datetime strings to datetime data types
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)  
-        try:
-            for col in df.columns:
-                # Only attempt datetime inference if the column is a string
-                if pd.api.types.is_string_dtype(df[col]):
-                    df[col] = infer_datetime_column(df, col) 
-        except:
-            pass  # leave it be
-
-    return df
+	return df
 #---------------------------------------------------------------------------------- 
 
 def infer_data_types(series):
