@@ -3322,9 +3322,14 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
     pd.DataFrame
         DataFrame with columns: Primary_table, SQL_Error_Query, Message, Level, Lookup_Column, Lookup_Value, Error_Value.
     """
-    results = []
-    try:    
+    # remove extra spaces and hidden chars
+    # Use a single, comprehensive regex to handle all unwanted characters
+    # and replace them with a single space to avoid concatenation issues.
+    cleaned_sql = re.sub(r'[\s\x00-\x1F\x7F\u200B\uFEFF\xa0]+', ' ', sql_statement.strip())
+    sql_statement = cleaned_sql
 
+    results = []
+    try:
         # Extract the table names and set primary table name for the SQL statement
         q_tbls = extract_all_table_names(sql_statement)
 
@@ -3336,7 +3341,7 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
 
         # Find all unique columns in the entire query
         sql_ref_cols = get_all_columns_from_sql(sql_statement)
-                
+
         # Execute the modified SQL statement
         spark_result = Config.SPARK_SESSION.sql(sql_statement)
         result_df = convert_to_pyspark_pandas(spark_result)
@@ -3345,13 +3350,13 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
         if result_df is None or len(result_df) == 0:
             # Append error information if no rows are returned
             results.append({
-                "Primary_table"     : primary_table,
-                "SQL_Error_Query"   : sql_statement,
-                "Message"           : 'OK-No rows returned',
-                "Level"             : 'Good',
-                "Lookup_Column"     : '',
-                "Lookup_Value"      : '',
-                "Error_Value"       : ''
+                "Primary_table": primary_table,
+                "SQL_Error_Query": sql_statement,
+                "Message": 'OK-No rows returned',
+                "Level": 'Good',
+                "Lookup_Column": '',
+                "Lookup_Value": '',
+                "Error_Value": ''
             })
         else:
             unique_column = get_best_uid_column(result_df)
@@ -3362,29 +3367,17 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
                 else:
                     row_dict_str = str({col: row[col] for col in sql_ref_cols if col in row.index})
                 results.append({
-                    "Primary_table"     : primary_table,
-                    "SQL_Error_Query"   : sql_statement,
-                    "Message"           : error_message,
-                    "Level"             : error_level,
-                    "Lookup_Column"     : unique_column,
-                    "Lookup_Value"      : row[unique_column],
-                    "Error_Value"       : row_dict_str
+                    "Primary_table": primary_table,
+                    "SQL_Error_Query": sql_statement,
+                    "Message": error_message,
+                    "Level": error_level,
+                    "Lookup_Column": unique_column,
+                    "Lookup_Value": row[unique_column],
+                    "Error_Value": row_dict_str
                 })
     except Exception as e:
         # Append error information if the SQL execution fails
-        print(f'Error executing SQL statement: {primary_table}: /n{sql_statement} /n{str(e)}')
-        results.append({
-            "Primary_table"     : primary_table,
-            "SQL_Error_Query"   : sql_statement,
-            "Message"           : f"SQL Query Failed: {str(e)}",
-            "Level"             : 'SQL Error',
-            "Lookup_Column"     : '',
-            "Lookup_Value"      : '',
-            "Error_Value"       : ''
-        })
-
-    return pd.DataFrame(results)
-
+        print(f'Error executing SQL statement: {primary_table}: \n{sql_statement}
 #---------------------------------------------------------------------------------- 
 
 # def get_rows_with_condition_sqlite(tables, sql_statement, conn, error_message, error_level='error'):
@@ -3502,6 +3495,9 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
     # Extract table references from each SQL rule
     for index, row in rules_df.iterrows():
         sql_statement = row['SQL Error Query']
+        # remove extra spaces and hidden chars
+        sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
+        sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
         sql_ref_tables.append(extract_all_table_names(sql_statement))
 
     # Load CSV files into an in-memory if needed
@@ -3510,9 +3506,13 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
     # Iterate over each rule in the rules DataFrame
     for index, row in rules_df.iterrows():
         primary_table = str(row['Primary Table'])
-        sql_statement = str(row['SQL Error Query'])
+        sql_statement = row['SQL Error Query']
         error_level = str(row['Level'])
         error_message = str(row['Message'])
+
+        # remove extra spaces and hidden chars
+        sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
+        sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
 
         print(f'\nRunning query: \n\t\t{sql_statement}')
         if conn == 'pyspark_pandas':
@@ -3526,11 +3526,11 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
         # else:
         #     # Get rows that meet the condition specified in the SQL statement
         #     error_rows = get_rows_with_condition_sqlite(tables, sql_statement, error_message, error_level, conn)
-        
+
         # If there are any error rows, concatenate them to the errors DataFrame
         if not error_rows.empty:
             errors_df = pd.concat([errors_df, error_rows], ignore_index=True)
-    
+
     return errors_df
 
 #---------------------------------------------------------------------------------- 
