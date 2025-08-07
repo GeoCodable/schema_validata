@@ -1317,7 +1317,7 @@ def read_df_with_optimal_dtypes(file_path,
 	
 	for col in df.columns:
 		#if spark determined it is a datatime, reatin it 
-		if dtypes.get(col) = 'datetime64[ns]':
+		if dtypes.get(col) == 'datetime64[ns]':
 			continue
 		non_null_values = get_non_null_values(df[col])
 		
