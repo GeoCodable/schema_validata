@@ -660,6 +660,10 @@ def infer_datetime_column(df, column_name):
 	is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
 	_s = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
 	orig_series = _s.copy()
+	
+	# Check if the column is already a datetime type
+	if pd.api.types.is_datetime64_any_dtype(_s):
+		return df[column_name] if is_spark_pandas else orig_series
 
 	non_null_values = _s.dropna()
 	if non_null_values.empty:
