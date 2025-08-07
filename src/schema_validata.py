@@ -1881,33 +1881,17 @@ def get_dict_diffs(dict1, dict2):
                 # If sorting fails due to type mismatch, consider it a mismatch
                 mismatches[key] = {"expected": value, "observed": dict2[key]}
         else:
-            # ------code update start-------
-            # Downcast both values before comparison to handle int vs float differences
-            value_downcast = downcast_ints(value)
-            dict2_value_downcast = downcast_ints(dict2[key])
-
-            # Use a try-except block to handle cases where a direct comparison
-            # might fail due to type issues (e.g., comparing a string and a number).
             try:
-                if value_downcast != dict2_value_downcast:
-                    mismatches[key] = {"expected": value, "observed": dict2[key]}
-            except (ValueError, TypeError):
-                # If direct value comparison fails, perform a direct value comparison
-                if value != dict2[key]:
-                    mismatches[key] = {"expected": value, "observed": dict2[key]}
-            # ------code update end-------
-        # else:
-        #     try:
-        #         # Try to cast to ints
-        #         value = downcast_ints(value)
-        #         dict2[key] = downcast_ints(dict2[key])
+                # Try to cast to downcast as int and and compare
+                obs_downcast = downcast_ints(value)
+                exp_downcast = downcast_ints(dict2[key])
 
-        #         # Attempt casting dict2[key] to the datatype of value
-        #         if type(value)(dict2[key]) != value:
-        #             mismatches[key] = {"expected": value, "observed": dict2[key]}
-        #     except (ValueError, TypeError):
-        #         # If casting fails, consider it a mismatch
-        #         mismatches[key] = {"expected": value, "observed": dict2[key]}
+                # Attempt casting dict2[key] to the datatype of value
+                if type(obs_downcast)(obs_downcast) != obs_downcast:
+                    mismatches[key] = {"expected": obs_downcast, "observed": obs_downcast}
+            except (ValueError, TypeError):
+                # If casting fails, consider it a mismatch
+                mismatches[key] = {"expected": value, "observed": dict2[key]}
 
     return mismatches
 
