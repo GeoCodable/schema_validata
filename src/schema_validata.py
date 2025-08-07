@@ -412,25 +412,25 @@ def is_numeric_type(value):
 # ----------------------------------------------------------------------------------
 
 def downcast_ints(value):
-    """
-    Downcast a numeric value to an integer if it is equal to 
-    a float representation.
-    
-    Parameters
-    ----------
-    value: The numeric value to downcast.
-    
-    Returns
-    -------
-    The value as an integer if it is equal to its float 
-    representation, otherwise the original value.
-    """
-    try:
-        if isinstance(value, float) and int(value) == float(value):
-            return int(value)
-    except ValueError:
-        pass
-    return value
+	"""
+	Downcast a numeric value to an integer if it is equal to 
+	a float representation.
+	
+	Parameters
+	----------
+	value: The numeric value to downcast.
+	
+	Returns
+	-------
+	The value as an integer if it is equal to its float 
+	representation, otherwise the original value.
+	"""
+	try:
+		if isinstance(value, float) and int(value) == float(value):
+			return int(value)
+	except ValueError:
+		pass
+	return value
 
 # ----------------------------------------------------------------------------------
 
@@ -1613,14 +1613,17 @@ def build_data_dictionary(df,
                     else:
                         column_info["allowed_value_list"] = sorted(_s_filtered.astype(str).unique())  
 
-            # document max length of values          
-            if column_info["length"] == na_val:
+            # document max length of values
+            #------code update start-------
+            if pd.api.types.is_string_dtype(_s_filtered) or pd.api.types.is_numeric_dtype(_s_filtered):
                 try:
-                    # Fix: Use the filtered series to calculate length
-                    column_info["length"] = int(_s_filtered.astype(str).str.len().max())
-                except:
-                    pass
-        
+                    max_len = _s_filtered.astype(str).str.len().max()
+                    if not pd.isna(max_len):
+                        column_info["length"] = downcast_ints(max_len)
+                except (TypeError, AttributeError):
+                    column_info["length"] = na_val
+            #------code update end-------
+
         data_dict[col] = column_info
     return data_dict
 
