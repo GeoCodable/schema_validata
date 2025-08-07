@@ -640,66 +640,61 @@ def column_is_timestamp(df, column_name, time_format):
 # ----------------------------------------------------------------------------------
 
 def infer_datetime_column(df, column_name):
-    """
-    Attempts to convert a pandas or pyspark.pandas column to a datetime
-    type, handling various formats and edge cases.
+	"""
+	Attempts to convert a pandas or pyspark.pandas column to a datetime
+	type, handling various formats and edge cases.
 
-    Parameters
-    ----------
-    df : pandas.DataFrame or pyspark.pandas.DataFrame
-        The DataFrame containing the column to be inferred.
-    column_name : str
-        The name of the column to infer and convert.
+	Parameters
+	----------
+	df : pandas.DataFrame or pyspark.pandas.DataFrame
+		The DataFrame containing the column to be inferred.
+	column_name : str
+		The name of the column to infer and convert.
 
-    Returns
-    -------
-    pandas.Series or pyspark.pandas.Series
-        The converted Series with a datetime type if a match is found.
-        Otherwise, returns the original Series.
-    """
-    is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
-    _s = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
-    orig_series = _s.copy()
+	Returns
+	-------
+	pandas.Series or pyspark.pandas.Series
+		The converted Series with a datetime type if a match is found.
+		Otherwise, returns the original Series.
+	"""
+	is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
+	_s = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
+	orig_series = _s.copy()
 
-    non_null_values = _s.dropna()
-    if non_null_values.empty:
-        return df[column_name] if is_spark_pandas else orig_series
+	non_null_values = _s.dropna()
+	if non_null_values.empty:
+		return df[column_name] if is_spark_pandas else orig_series
 
-    # Check for string or object columns.
-    if pd.api.types.is_string_dtype(non_null_values) or \
-       pd.api.types.is_object_dtype(non_null_values):
+	# Check for string or object columns.
+	if pd.api.types.is_string_dtype(non_null_values) or \
+		pd.api.types.is_object_dtype(non_null_values):
 
-        inferred_type = check_all_int(non_null_values)
+		inferred_type = check_all_int(non_null_values)
 
-        # Handle the special case of very long numeric strings.
-        if inferred_type == 'str':
-            # This is the only code that will run inside the 'if inferred_type == 'str':' block.
-            # It now directly tries to parse the remaining string formats.
+		# Handle the special case of very long numeric strings.
+		if inferred_type == 'str':
+			# If the column is a string and not numeric, check for specific datetime formats.
+			for date_format in Config.COMMON_DATETIMES:
+				try:
+					converted_series = pd.to_datetime(_s, format=date_format)
+					return ps.Series(converted_series) if is_spark_pandas else converted_series
+				except:
+					pass
+			
+			# Check for time-only formats.
+			for time_format in Config.COMMON_TIMESTAMPS:
+				try:
+					converted_series = pd.to_datetime(_s, format=time_format)
+					return ps.Series(converted_series) if is_spark_pandas else converted_series
+				except:
+					pass
+			
+		# Guardrail: If it's a standard numeric string, it's not a date.
+		if inferred_type in ['Int64', 'Float64']:
+			return df[column_name] if is_spark_pandas else orig_series
 
-            # If the column is a string and not numeric, check for specific datetime formats.
-            for date_format in Config.COMMON_DATETIMES:
-                try:
-                    converted_series = pd.to_datetime(non_null_values, format=date_format)
-                    return ps.Series(converted_series) if is_spark_pandas else converted_series
-                except:
-                    pass
-            
-            # Check for time-only formats.
-            for time_format in Config.COMMON_TIMESTAMPS:
-                try:
-                    converted_series = pd.to_datetime(non_null_values, format=time_format)
-                    return ps.Series(converted_series) if is_spark_pandas else converted_series
-                except:
-                    pass
-        
-        # Guardrail: If it's a standard numeric string, it's not a date.
-        # This part of the code is now unreachable since the function returns
-        # from the block above if inferred_type is 'str'.
-        if inferred_type in ['Int64', 'Float64']:
-            return df[column_name] if is_spark_pandas else orig_series
-
-    return df[column_name] if is_spark_pandas else orig_series
-
+	return df[column_name] if is_spark_pandas else orig_series
+	
 # ----------------------------------------------------------------------------------
 
 def detect_file_encoding(file_path):
@@ -1325,56 +1320,57 @@ def read_df_with_optimal_dtypes(file_path,
 #---------------------------------------------------------------------------------- 
 
 def infer_data_types(series):
-    """
-    Documents the most likely data type of a pandas or Spark Series based on 
-    the non-null values in the series/column.
+	"""
+	Documents the most likely data type of a pandas or Spark Series based on 
+	the non-null values in the series/column.
 
-    Parameters
-    ----------
-    series (pandas.Series or pyspark.pandas.Series): 
-        The series/column to analyze.
+	Parameters
+	----------
+	series (pandas.Series or pyspark.pandas.Series): 
+		The series/column to analyze.
 
-    Returns
-    -------
-    str: 
-        The name of the data type, including the values:
-        "Null-Unknown", "Boolean", "Integer", "Float", 
-        "Datetime", "String", or "Other".
-    """
-    if not isinstance(series, ps.Series):
-        series = ps.from_pandas(series)
+	Returns
+	-------
+	str: 
+		The name of the data type, including the values:
+		"Null-Unknown", "Boolean", "Integer", "Float", 
+		"Datetime", "String", or "Other".
+	"""
+	if not isinstance(series, ps.Series):
+		series = ps.from_pandas(series)
 
-    non_null_values = series.dropna()
+	non_null_values = series.dropna()
 
-    if non_null_values.count() == 0:
-        return "Null-Unknown"
-    else:
-        dtype = str(non_null_values.dtype)
-        if dtype == "bool":
-            return "Boolean"
-        elif dtype in ["int8", "int16", "int32", "int64", "Int64"]:
-            return "Integer"
-        elif dtype in ["float16", "float32", "float64", "Float64"]:
-            return "Float"
-        elif "datetime" in dtype or "date" in dtype:
-            return "Datetime"
-        elif dtype == "object" or dtype == "string":
-            # Use the robust check_all_int function to infer numeric types
-            inferred_type = check_all_int(series)
-            if inferred_type == 'Int64':
-                return "Integer"
-            elif inferred_type == 'Float64':
-                return "Float"
-            # If not a numeric type, then check for datetime
-            else:
-                try:
-                    _ = non_null_values.astype("datetime64[ns]")
-                    return "Datetime"
-                except:
-                    return "String"
-        else:
-            return "Other"
-
+	if non_null_values.count() == 0:
+		return "Null-Unknown"
+	else:
+		dtype = str(non_null_values.dtype)
+		if dtype == "bool":
+			return "Boolean"
+		elif dtype in ["int8", "int16", "int32", "int64", "Int64"]:
+			return "Integer"
+		elif dtype in ["float16", "float32", "float64", "Float64"]:
+			return "Float"
+		elif "datetime" in dtype or "date" in dtype:
+			return "Datetime"
+		elif dtype == "object" or dtype == "string":
+			# Use the robust check_all_int function to infer numeric types
+			inferred_type = check_all_int(series)
+			if inferred_type == 'Int64':
+				return "Integer"
+			elif inferred_type == 'Float64':
+				return "Float"
+			# If not a numeric type, then check for datetime using a robust check
+			else:
+				# We can create a dummy df for the infer_datetime_column function as it's not a helper.
+				df_temp = ps.DataFrame({series.name: series})
+				if infer_datetime_column(df_temp, series.name) is not None:
+					return "Datetime"
+				# Otherwise, the type is a String.
+				else:
+					return "String"
+		else:
+			return "Other"
 #---------------------------------------------------------------------------------- 
 
 def check_na_value(value, 
