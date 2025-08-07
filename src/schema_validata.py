@@ -639,63 +639,80 @@ def column_is_timestamp(df, column_name, time_format):
 
 # ----------------------------------------------------------------------------------
 
+from dateutil import parser as dt_parser
+
 def infer_datetime_column(df, column_name):
 	"""
 	Attempts to convert a pandas or pyspark.pandas column to a datetime
 	type, handling various formats and edge cases.
-
-	Parameters
-	----------
-	df : pandas.DataFrame or pyspark.pandas.DataFrame
-		The DataFrame containing the column to be inferred.
-	column_name : str
-		The name of the column to infer and convert.
-
-	Returns
-	-------
-	pandas.Series or pyspark.pandas.Series
-		The converted Series with a datetime type if a match is found.
-		Otherwise, returns the original Series.
 	"""
 	is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
-	_s = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
-	orig_series = _s.copy()
-	
-	# Check if the column is already a datetime type
-	if pd.api.types.is_datetime64_any_dtype(_s):
+	series_for_processing = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
+	orig_series = series_for_processing.copy()
+
+	# If the column is already a datetime type, return it immediately.
+	if pd.api.types.is_datetime64_any_dtype(series_for_processing):
 		return df[column_name] if is_spark_pandas else orig_series
 
-	non_null_values = _s.dropna()
-	if non_null_values.empty:
-		return df[column_name] if is_spark_pandas else orig_series
+	# Define a threshold for successful conversion to avoid false positives.
+	# This requires at least 80% of non-null values to be valid dates.
+	conversion_threshold = 0.8
 
-	# Check for string or object columns.
-	if pd.api.types.is_string_dtype(non_null_values) or \
-		pd.api.types.is_object_dtype(non_null_values):
+	# Handle numeric columns that might be Excel serial dates.
+	if pd.api.types.is_numeric_dtype(series_for_processing):
+		non_null_count = series_for_processing.dropna().count()
+		
+		# Only proceed if there are values to check.
+		if non_null_count > 0:
+			# Use a guardrail to check if the numbers are within a plausible date range.
+			is_plausible_date = (series_for_processing > 1).all() and (series_for_processing < 100000).all()
 
-		inferred_type = check_all_int(non_null_values)
-
-		# Handle the special case of very long numeric strings.
-		if inferred_type == 'str':
-			# If the column is a string and not numeric, check for specific datetime formats.
-			for date_format in Config.COMMON_DATETIMES:
+			if is_plausible_date:
 				try:
-					converted_series = pd.to_datetime(_s, format=date_format)
-					return ps.Series(converted_series) if is_spark_pandas else converted_series
-				except:
-					pass
-			
-			# Check for time-only formats.
-			for time_format in Config.COMMON_TIMESTAMPS:
+					# Convert the numeric series to a datetime object, assuming an Excel origin.
+					converted_series = pd.to_datetime(series_for_processing,
+						origin='1899-12-30',
+						unit='D',
+						errors='coerce')
+					
+					# Compare the count of successfully converted dates to the original non-null count.
+					successfully_converted_count = converted_series.dropna().count()
+					if successfully_converted_count / non_null_count >= conversion_threshold:
+						return ps.Series(converted_series) if is_spark_pandas else converted_series
+				except Exception:
+					pass # Conversion failed, so proceed to the next checks.
+
+	# Handle string columns using a flexible date parser.
+	elif pd.api.types.is_string_dtype(series_for_processing):
+		non_null_values = series_for_processing.dropna()
+		non_null_count = non_null_values.count()
+		
+		# Only proceed if there are values to check.
+		if non_null_count > 0:
+			# The check_all_int function is still useful here to prevent parsing
+			# columns of pure numbers that are not dates as strings.
+			inferred_type = check_all_int(non_null_values)
+			if inferred_type not in ['str', 'object']:
+				return df[column_name] if is_spark_pandas else orig_series
+
+			def try_dateutil_parser(x):
 				try:
-					converted_series = pd.to_datetime(_s, format=time_format)
-					return ps.Series(converted_series) if is_spark_pandas else converted_series
-				except:
-					pass
-			
-		# Guardrail: If it's a standard numeric string, it's not a date.
-		if inferred_type in ['Int64', 'Float64']:
-			return df[column_name] if is_spark_pandas else orig_series
+					# Use dateutil.parser to parse a wide variety of date strings.
+					return dt_parser.parse(x)
+				except (ValueError, TypeError):
+					return None
+
+			# Apply the flexible parser to the non-null series.
+			converted_series = non_null_values.apply(try_dateutil_parser)
+
+			# Combine the converted series with the original nulls.
+			combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
+			combined_series.loc[converted_series.index] = converted_series
+
+			# Compare the count of successfully converted dates to the original non-null count.
+			successfully_converted_count = combined_series.dropna().count()
+			if successfully_converted_count / non_null_count >= conversion_threshold:
+				return ps.Series(combined_series) if is_spark_pandas else combined_series
 
 	return df[column_name] if is_spark_pandas else orig_series
 	
