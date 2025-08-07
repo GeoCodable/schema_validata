@@ -1276,7 +1276,6 @@ def read_df_with_optimal_dtypes(file_path,
 	else:
 		file_path = db_path_to_local(file_path)
 	
-	# --- STAGE 1: READ TO FIND NULLS ---
 	# Read the sheet without specifying initial data types to find nulls
 	df = read_spreadsheet_with_params(file_path, sheet_name, str, na_values)
 
@@ -1291,9 +1290,8 @@ def read_df_with_optimal_dtypes(file_path,
 			read_as_na.extend(list(set(null_p_vals)))
 	read_as_na = list(set(read_as_na))
 	
-	# --- STAGE 2: BUILD DTYPES DICTIONARY ---
 	if Config.USE_PYSPARK:
-		# Use Spark to infer dtypes. We'll use this to get our datetime columns.
+		# Use Spark to infer dtypes. 
 		try:
 			# Assume spark_read_spreadsheet is a function that reads a file into a Spark DataFrame.
 			spark_df = spark_read_spreadsheet(file_path, sheet_name=sheet_name, na_values=read_as_na)
@@ -1301,11 +1299,11 @@ def read_df_with_optimal_dtypes(file_path,
 			for col in spark_df.columns:
 				spark_dtype = spark_df.schema[col].dataType.simpleString()
 				
-				# If Spark inferred a date or timestamp, use that dtype.
+				# if Spark inferred a date or timestamp, use that dtype.
 				if 'timestamp' in spark_dtype or 'date' in spark_dtype:
 					dtypes[col] = 'datetime64[ns]'
 				else:
-					# Otherwise, default to string for the final read to use your custom logic.
+					# default to string 
 					dtypes[col] = str
 					
 		except Exception:
@@ -1318,7 +1316,7 @@ def read_df_with_optimal_dtypes(file_path,
 	
 	for col in df.columns:
 		#if spark determined it is a datatime, reatin it 
-		if dtypes.get(col) == 'datetime64[ns]':
+		if 'date' in str(dtypes.get(col)):
 			continue
 		non_null_values = get_non_null_values(df[col])
 		
@@ -1335,7 +1333,7 @@ def read_df_with_optimal_dtypes(file_path,
 		else:
 			dtypes[col] = str
 
-	# --- STAGE 3: FINAL READ WITH INFERRED DTYPES ---
+
 	# Read the data one last time with the complete dtypes dictionary.
 	df = read_spreadsheet_with_params(file_path,
 		sheet_name,
@@ -1347,7 +1345,7 @@ def read_df_with_optimal_dtypes(file_path,
 		warnings.simplefilter("ignore", RuntimeWarning)
 		try:
 			for col in df.columns:
-				# Only attempt datetime inference if the column is a string
+				# only attempt datetime inference if the column is a string
 				if pd.api.types.is_string_dtype(df[col]):
 					df[col] = infer_datetime_column(df, col)
 		except:
