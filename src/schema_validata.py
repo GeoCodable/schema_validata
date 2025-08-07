@@ -1982,17 +1982,17 @@ def schema_validate_column_length(attribute, p_errors):
     exp_len_val = p_errors[attribute].get('expected')
 
     if exp_len_val is None:
-        return None  # No max length defined, so no error.
+    	return None  # No max length defined, so no error.
     
     # try:
 	# Attempt to cast the values to integers. This handles cases where 
 	# a float or string representation of an integer is present.
-	obs_len = int(obs_len_val) if isinstance(obs_len_val, (str, int, float)) else None
-	exp_len = int(exp_len_val) if isinstance(exp_len_val, (str, int, float)) else None
+    obs_len = int(obs_len_val) if isinstance(obs_len_val, (str, int, float)) else None
+    exp_len = int(exp_len_val) if isinstance(exp_len_val, (str, int, float)) else None
 	
-	# Now perform the comparison on the safely cast integers.
-	if exp_len is not None and (obs_len is None or obs_len > exp_len):
-		return attribute
+    # Now perform the comparison on the safely cast integers.
+    if exp_len is not None and (obs_len is None or obs_len > exp_len):
+    	return attribute
     # except (ValueError, TypeError):
     #     # If the casting fails (e.g., the value is a non-numeric string),
     #     # consider it an error and flag the attribute.
