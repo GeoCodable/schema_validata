@@ -1976,15 +1976,29 @@ def schema_validate_column_length(attribute, p_errors):
     str or None: Returns the attribute name if an inequality is found, 
                  indicating an error. Returns None if the values match.
     """
-    obs_len = p_errors[attribute]['observed']
-    exp_len = p_errors[attribute]['expected']
+    # ------code update start-------
+    # Retrieve observed and expected length values, which may be None
+    obs_len_val = p_errors[attribute].get('observed')
+    exp_len_val = p_errors[attribute].get('expected')
 
-    is_obs_valid = isinstance(obs_len, (str, int, float))
-    is_exp_valid = isinstance(exp_len, (str, int, float))
-
-    if is_exp_valid and (not is_obs_valid or int(obs_len) > int(exp_len)):
+    if exp_len_val is None:
+        return None  # No max length defined, so no error.
+    
+    try:
+        # Attempt to cast the values to integers. This handles cases where 
+        # a float or string representation of an integer is present.
+        obs_len = int(obs_len_val) if isinstance(obs_len_val, (str, int, float)) else None
+        exp_len = int(exp_len_val) if isinstance(exp_len_val, (str, int, float)) else None
+        
+        # Now perform the comparison on the safely cast integers.
+        if exp_len is not None and (obs_len is None or obs_len > exp_len):
+            return attribute
+    except (ValueError, TypeError):
+        # If the casting fails (e.g., the value is a non-numeric string),
+        # consider it an error and flag the attribute.
         return attribute
 
+    # ------code update end-------
     return None
 
 #---------------------------------------------------------------------------------- 
