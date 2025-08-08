@@ -1328,10 +1328,10 @@ def read_df_with_optimal_dtypes(
     # Attempt Spark-based inference if enabled
     if Config.USE_PYSPARK:
         try:
-			# Read spreadsheet into Spark DataFrame
-			# Convert os path to DBFS path for PySpark
-			# Read spreadsheet into Spark DataFrame
-			spark_file_path = to_dbfs_path(file_path)
+            # Read spreadsheet into Spark DataFrame
+            # Convert os path to DBFS path for PySpark
+            # Read spreadsheet into Spark DataFrame
+            spark_file_path = to_dbfs_path(file_path)
             spark_df = spark_read_spreadsheet(spark_file_path, sheet_name=sheet_name, na_values=read_as_na)
             for col in spark_df.columns:
                 spark_dtype = spark_df.schema[col].dataType.simpleString()
