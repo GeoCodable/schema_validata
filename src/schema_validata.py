@@ -1495,47 +1495,61 @@ def infer_data_types(series):
 			
 #---------------------------------------------------------------------------------- 
 
-def check_na_value(value, 
-                    na_values=Config.NA_VALUES, 
-                    na_patterns=Config.NA_PATTERNS):
-    """
-    Checks if a value is considered a missing value based on predefined 
-    patterns and custom values.
-    
-    This function has been updated to use the re.IGNORECASE flag for consistency.
+def check_na_value(value, na_values=Config.NA_VALUES, na_patterns=Config.NA_PATTERNS):
+	"""
+	Checks if a value is considered a missing value.
 
-    Parameters:
-    ----------
-    value: 
-        The value to be checked.
-    na_values: (Optional) 
-        List of values to consider nulls in addition to standard nulls. 
-        (default: Config.NA_VALUES)
-    na_patterns: (Optional) 
-        List of regular expressions to identify strings representing
-        missing values. 
-        (default: Config.NA_PATTERNS)
-    Returns:
-    ----------
-    bool: 
-        True if the value is considered a missing/null value, 
-        False otherwise.
-    """
-    if pd.isna(value) or value is None:
-        return True    
-    elif isinstance(value, str):
-        if na_patterns:
-            # UPDATED: We now compile the patterns with the IGNORECASE flag for consistency.
-            compiled_patterns = [re.compile(p, re.IGNORECASE) for p in na_patterns]
-            if any(p.search(value) for p in compiled_patterns):
-                return True
-        if na_values:
-            # We check the lowercase version of the string against lowercase na_values
-            return not value.strip() or value.lower() in [v.lower() for v in na_values]
-    else:
-        # For non-string values, we don't need to check patterns or strip
-        return na_values and value in na_values
-    return False
+	The function uses predefined patterns and custom values to determine
+	if a given value should be treated as null.
+
+	Parameters
+	----------
+	value : Any
+		The value to be checked.
+	na_values : list, optional
+		A list of values to consider as nulls in addition to standard
+		nulls (e.g., `None`, `NaN`). Defaults to `Config.NA_VALUES`.
+	na_patterns : list, optional
+		A list of regular expressions to identify strings that represent
+		missing values. Defaults to `Config.NA_PATTERNS`.
+
+	Returns
+	-------
+	bool
+		True if the value is a missing/null value, False otherwise.
+
+	"""
+	# Check for standard null values (e.g., np.nan, None).
+	if pd.isna(value) or value is None:
+		return True
+
+	# If the value is a string, check patterns and values.
+	elif isinstance(value, str):
+		# If na_patterns are defined, check for a regex match.
+		if na_patterns:
+			# The patterns are compiled with IGNORECASE for case-
+			# insensitive matching.
+			compiled_patterns = [re.compile(p, re.IGNORECASE) for p in na_patterns]
+			if any(p.search(value) for p in compiled_patterns):
+				return True
+
+		# If na_values are defined, check for a direct match.
+		if na_values:
+			# Check for an empty string after stripping whitespace.
+			if not value.strip():
+				return True
+			
+			# Create a list of lowercase na_values. The list
+			# comprehension safely handles non-string elements.
+			lowercase_na_values = [v.lower() for v in na_values if isinstance(v, str)]
+			if value.lower() in lowercase_na_values:
+				return True
+
+	# For non-string values, check for a direct match in na_values.
+	elif na_values and value in na_values:
+		return True
+
+	return False
 
 #---------------------------------------------------------------------------------- 
 
