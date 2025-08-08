@@ -3186,53 +3186,45 @@ def extract_primary_table(sql_statement):
 
 #---------------------------------------------------------------------------------- 
 
-def extract_all_table_names(sql_statement: str) -> list[str]:
+def extract_all_table_names(sql_statement):
     """
-    Extracts all fully qualified table names from a SQL statement.
-
-    This function first attempts to parse the SQL statement using the `sqlglot` library.
-    If `sqlglot` successfully finds any tables, it returns their fully qualified names.
-    If no tables are found by `sqlglot`, it falls back to `sqllineage`.
+    Extracts all fully qualified table names from an SQL statement using sqlglot, 
+    falling back to sqllineage and sqlparse if needed.
 
     Parameters
     ----------
     sql_statement : str
-        The SQL statement to be parsed.
+        The SQL statement to parse.
 
     Returns
     -------
-    list of str
-        A list of unique, fully qualified table names. Returns an empty list
-        if no tables are found or if an error occurs during parsing.
+    list
+        A list of all fully qualified table names found in the SQL statement.
     """
     try:
-        # Use sqlglot for robust parsing and fully qualified name extraction.
-        expressions = sqlglot.parse(sql_statement, read="databricks")
-        table_names = []
-        for expr in expressions:
-            tables = expr.find_all(Table)
-            for table in tables:
-                table_names.append(table.sql(dialect="databricks"))
-
-        if table_names:
+        expr = sqlglot.parse_one(sql_statement)
+        tables = expr.find_all(sqlglot.expressions.Table)
+        if tables:
+            table_names = [t.sql(dialect="databricks").split()[0] for t in tables]
             return list(set(table_names))
-
-    except Exception:
-        # Fallback to sqllineage if sqlglot fails.
-        try:
+        else:
             result = LineageRunner(sql_statement)
-            source_tables = [
-                str(tbl).replace("Table: ", "")
+            tables = [
+                str(tbl).replace('Table: ', '').replace('<default>.', '')
                 for tbl in result.source_tables
             ]
-            if source_tables:
-                return list(set(source_tables))
-        except Exception:
-            # If all parsing attempts fail, return an empty list.
-            pass
-            
-    return []
-
+            if tables:
+                return list(set(tables))
+            else:
+                parsed = sqlparse.parse(sql_statement)
+                found = []
+                for token in parsed[0].tokens:
+                    if token.ttype is None and token.get_real_name():
+                        found.append(token.get_real_name())
+                return list(set(found))
+    except Exception:
+        return []
+    
 #----------------------------------------------------------------------------------
 
 def get_all_columns_from_sql(sql_statement):
@@ -3337,7 +3329,6 @@ def get_all_columns_from_sql(sql_statement):
         add_to_list(column_exp.name)
 
     return all_columns
-
 
 #----------------------------------------------------------------------------------
 
@@ -3491,8 +3482,6 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
                 if sql_ref_cols is None:
                     row_dict_str = str({col: row[col] for col in row.index})
                 else:
-                    if unique_column not in sql_ref_cols and unique_column is not None:
-                        sql_ref_cols = [unique_column] + sql_ref_cols
                     row_dict_str = str({col: row[col] for col in sql_ref_cols if col in row.index})
                 results.append({
                     "Primary_table": primary_table,
