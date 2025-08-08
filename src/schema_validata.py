@@ -794,7 +794,7 @@ def read_spreadsheets(file_path,
                       sheet_name=None, 
                       dtype=None, 
                       rm_newlines=True,
-                      replace_char="", 
+                      replace_char=" ", 
                       na_values=None,
                       parse_dates=None
                       ):
@@ -841,6 +841,8 @@ def read_spreadsheets(file_path,
     base_name, ext = os.path.splitext(filename)
     
     file_path = db_path_to_local(file_path)
+
+    sheet_name = sheet_name if sheet_name is not None else 0
 
     if ext in [".xlsx", ".xls"]:
         df = pd.read_excel(file_path, 
@@ -1045,7 +1047,7 @@ def read_csv_or_excel_to_df(file_path,
                             infer=True,
                             multi_sheets=True, 
                             rm_newlines=True,
-                            replace_char="",
+                            replace_char=" ",
                             na_values=Config.NA_VALUES,
                             na_patterns=Config.NA_PATTERNS
                             ):
@@ -1119,6 +1121,7 @@ def read_csv_or_excel_to_df(file_path,
             # Read with string dtypes for accurate inference
             return {base_name: 
                     read_df_with_optimal_dtypes(file_path,
+                                                sheet_name=None, 
                                                 rm_newlines=rm_newlines,
                                                 replace_char=replace_char,
                                                 na_values=na_values,
