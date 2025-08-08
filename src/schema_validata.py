@@ -216,7 +216,7 @@ class Config:
         r'^\s+$'
     ]
 
-    # property set to either include all columns inthe data integrty output 
+    # property set to either include all columns in the data integrty output with *
     # or just the columns ecplicitly refernced in the sql queries
     Config.include_select_all = True
 
