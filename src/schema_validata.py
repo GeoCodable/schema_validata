@@ -864,9 +864,9 @@ def read_spreadsheets(file_path,
     # Use str.strip() to remove leading and trailing spaces from column names
     df.columns = df.columns.str.strip()
 
-    # Check if pyspark.pandas is available
-    # if Config.USE_PYSPARK:
-    #     df = ps.DataFrame(df)
+    #Check if pyspark.pandas is available
+    if Config.USE_PYSPARK:
+        df = ps.DataFrame(df)
 
     return df
 
@@ -923,13 +923,6 @@ def xlsx_tabs_to_pd_dataframes(file_path,
     for sheet_name in xls.sheet_names:
         # Choose the appropriate function based on the 'infer' parameter
         if infer:
-            print(f"file_path: {file_path}")
-            print(f"sheet_name: {sheet_name}")
-            print(f"rm_newlines: {rm_newlines}")
-            print(f"replace_char: {replace_char}")
-            print(f"na_values: {na_values}")
-            print(f"na_patterns: {na_patterns}")
-  
             df = read_df_with_optimal_dtypes(file_path, 
                                              sheet_name=sheet_name,
                                              rm_newlines=rm_newlines,
@@ -1773,7 +1766,6 @@ def build_data_dictionary(df,
                         column_info["allowed_value_list"] = sorted(_s_filtered.astype(str).unique())  
 
             # document max length of values
-            #------code update start-------
             if pd.api.types.is_string_dtype(_s_filtered) or pd.api.types.is_numeric_dtype(_s_filtered):
                 try:
                     max_len = _s_filtered.astype(str).str.len().max()
@@ -1781,7 +1773,6 @@ def build_data_dictionary(df,
                         column_info["length"] = downcast_ints(max_len)
                 except (TypeError, AttributeError):
                     column_info["length"] = na_val
-            #------code update end-------
 
         data_dict[col] = column_info
     return data_dict
@@ -2119,7 +2110,6 @@ def schema_validate_column_length(attribute, p_errors):
     str or None: Returns the attribute name if an inequality is found, 
                  indicating an error. Returns None if the values match.
     """
-    # ------code update start-------
     # Retrieve observed and expected length values, which may be None
     obs_len_val = p_errors[attribute].get('observed')
     exp_len_val = p_errors[attribute].get('expected')
@@ -2127,21 +2117,13 @@ def schema_validate_column_length(attribute, p_errors):
     if exp_len_val is None:
     	return None  # No max length defined, so no error.
     
-    # try:
-	# Attempt to cast the values to integers. This handles cases where 
-	# a float or string representation of an integer is present.
     obs_len = int(obs_len_val) if isinstance(obs_len_val, (str, int, float)) else None
     exp_len = int(exp_len_val) if isinstance(exp_len_val, (str, int, float)) else None
 	
     # Now perform the comparison on the safely cast integers.
     if exp_len is not None and (obs_len is None or obs_len > exp_len):
     	return attribute
-    # except (ValueError, TypeError):
-    #     # If the casting fails (e.g., the value is a non-numeric string),
-    #     # consider it an error and flag the attribute.
-    #     return attribute
 
-    # ------code update end-------
     return None
 
 #---------------------------------------------------------------------------------- 
@@ -2329,8 +2311,7 @@ def schema_validate_attribute(attribute,
         Returns the error type if a violation is found for the attribute.
         Returns None if no errors are detected for the attribute.
     """
-    # ------code update start-------
-    # The redundant 'range_checks' list has been removed.
+
     # The logic is now a simple dispatcher to the correct validation function.
     if attribute == 'data_type':
         # Validate data type
@@ -2352,7 +2333,6 @@ def schema_validate_attribute(attribute,
         return schema_validate_allowed_values(attribute, p_errors, msg_vals)
 
     return None
-    # ------code update end-------
 
 
 #---------------------------------------------------------------------------------- 
@@ -3207,44 +3187,52 @@ def extract_primary_table(sql_statement):
 
 #---------------------------------------------------------------------------------- 
 
-def extract_all_table_names(sql_statement):
+def extract_all_table_names(sql_statement: str) -> list[str]:
     """
-    Extracts all fully qualified table names from an SQL statement using sqlglot, 
-    falling back to sqllineage and sqlparse if needed.
+    Extracts all fully qualified table names from a SQL statement.
+
+    This function first attempts to parse the SQL statement using the `sqlglot` library.
+    If `sqlglot` successfully finds any tables, it returns their fully qualified names.
+    If no tables are found by `sqlglot`, it falls back to `sqllineage`.
 
     Parameters
     ----------
     sql_statement : str
-        The SQL statement to parse.
+        The SQL statement to be parsed.
 
     Returns
     -------
-    list
-        A list of all fully qualified table names found in the SQL statement.
+    list of str
+        A list of unique, fully qualified table names. Returns an empty list
+        if no tables are found or if an error occurs during parsing.
     """
     try:
-        expr = sqlglot.parse_one(sql_statement)
-        tables = expr.find_all(sqlglot.expressions.Table)
-        if tables:
-            table_names = [t.sql(dialect="databricks").split()[0] for t in tables]
+        # Use sqlglot for robust parsing and fully qualified name extraction.
+        expressions = sqlglot.parse(sql_statement, read="databricks")
+        table_names = []
+        for expr in expressions:
+            tables = expr.find_all(Table)
+            for table in tables:
+                table_names.append(table.sql(dialect="databricks"))
+
+        if table_names:
             return list(set(table_names))
-        else:
+
+    except Exception:
+        # Fallback to sqllineage if sqlglot fails.
+        try:
             result = LineageRunner(sql_statement)
-            tables = [
-                str(tbl).replace('Table: ', '').replace('<default>.', '')
+            source_tables = [
+                str(tbl).replace("Table: ", "")
                 for tbl in result.source_tables
             ]
-            if tables:
-                return list(set(tables))
-            else:
-                parsed = sqlparse.parse(sql_statement)
-                found = []
-                for token in parsed[0].tokens:
-                    if token.ttype is None and token.get_real_name():
-                        found.append(token.get_real_name())
-                return list(set(found))
-    except Exception:
-        return []
+            if source_tables:
+                return list(set(source_tables))
+        except Exception:
+            # If all parsing attempts fail, return an empty list.
+            pass
+            
+    return []
 
 #----------------------------------------------------------------------------------
 
@@ -3305,20 +3293,19 @@ def get_all_columns_from_sql(sql_statement):
                 from_exp = select_exp.args.get('from')
                 if not from_exp:
                     continue
-                
-                # Recursively find all Table expressions within the FROM clause
-                for table_exp in from_exp.find_all(Table):
-                    # Use .name to get the base table name without aliases
-                    base_table_name = table_exp.name
+
+                # Get fully qualified names 
+                sql_from_clause = from_exp.sql()
+                tables_in_from_clause = extract_all_table_names(sql_from_clause)
+
+                for base_table_name in tables_in_from_clause:
                     try:
-                        # Query Spark's catalog for the table schema
+                        # Query Spark's catalog for the table schema using the full name
                         df = Config.SPARK_SESSION.table(base_table_name)
                         for col in df.columns:
                             add_to_list(col)
                     except Exception as e:
                         print(f"Warning: Could not retrieve schema for table '{base_table_name}': {e}")
-    
-    # Handle CTEs first by recursively processing them. This ensures columns from
     #    'WITH' clauses are resolved before they are referenced in the main query.
     if isinstance(parsed_query, With):
         for cte_exp in parsed_query.expressions:
@@ -3671,9 +3658,6 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
                 error_message=error_message, 
                 error_level=error_level
             )
-        # else:
-        #     # Get rows that meet the condition specified in the SQL statement
-        #     error_rows = get_rows_with_condition_sqlite(tables, sql_statement, error_message, error_level, conn)
 
         # If there are any error rows, concatenate them to the errors DataFrame
         if not error_rows.empty:
