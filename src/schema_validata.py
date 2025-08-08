@@ -122,6 +122,11 @@ class Config:
         False   : "Informational/Warning",  
     }
 
+	DATE_COL_KEYWORDS = [
+	    'date', 'time', 'datetime', 'timestamp', 'dob', 'dt', 
+		'created', 'modified', 'updated', 'birthday', 'event_time'
+	]
+
     # Common US & ISO timestamp formats
     COMMON_TIMESTAMPS = [
                         # Common US Formats - Time 
@@ -160,45 +165,48 @@ class Config:
                         "%Y-%m-%dT%H:%M:%S%z", # Combined Date and Time with Offset (Rare)
                         ]
 
-    if pd.__version__ >= '1.5':
-	    NA_VALUES = [
-	        '#N/A N/A',  # Less standard combination
-	        '-1.#IND',   # Specific float representation
-	        '-1.#QNAN',  # Specific float representation
-	        '1.#IND',    # Specific float representation
-	        '1.#QNAN',   # Specific float representation
-	        '<NA>',      # While pandas uses pd.NA, this string might not be default
-	        'NULL',      # Uppercase NULL
-	        'Null',      # Capitalized Null
-	        '#REF!'      # Excel error
-	    ]
-    else:
-	    NA_VALUES = [
-	        '',          # Empty string
-	        ' ',         # Single space
-	        '#N/A',      # Excel error
-	        '#N/A N/A',  # Less standard combination
-	        '#NA',       # Excel error
-	        '-1.#IND',   # Specific float representation
-	        '-1.#QNAN',  # Specific float representation
-	        '-NaN',      # Negative NaN
-	        '-nan',      # Negative NaN (lowercase)
-	        '1.#IND',    # Specific float representation
-	        '1.#QNAN',   # Specific float representation
-	        '<NA>',      # While pandas uses pd.NA, this string might not be default
-	        'N/A',       # Common representation of missing values
-	        'NA',        # Common representation of missing values
-	        'NULL',      # Uppercase NULL
-	        'NaN',       # Not a Number
-	        'n/a',       # Lowercase n/a
-	        'nan',       # Lowercase nan
-	        'null',      # Lowercase null
-	        'Null',      # Capitalized Null
-	        '#REF!',     # Excel error
-	        np.nan,      # NumPy NaN
-	        None,        # Python None
-	        'None'       # String None
-	    ]
+	# Common null/missing value representations
+	COMMON_NA_VALUES = [
+	    '',           # Empty string
+	    ' ',          # Single space
+	    'N/A',        # Common missing value
+	    'n/a',        # Lowercase n/a
+	    'NA',         # Common missing value
+	    'na',         # Lowercase na
+	    'NULL',       # Uppercase NULL
+	    'Null',       # Capitalized Null
+	    'null',       # Lowercase null
+	    'None',       # String None
+	    None,         # Python None
+	    np.nan,       # NumPy NaN
+	    'NaN',        # Not a Number
+	    'nan',        # Lowercase nan
+	    '-NaN',       # Negative NaN
+	    '-nan',       # Negative NaN (lowercase)
+	    '#N/A',       # Excel error
+	    '#NA',        # Excel error
+	    '<NA>',       # Pandas string for missing value
+	    '#REF!',      # Excel error
+	    '#VALUE!',    # Excel error
+	    '#DIV/0!',    # Excel division by zero error
+	    'missing',    # Lowercase missing
+	    'Missing',    # Capitalized missing
+	]
+	
+	# Additional values unique to pandas >= 1.5
+	NA_VALUES_v15plus_extra = [
+	    '#N/A N/A',  # Less standard combination
+	    '-1.#IND',   # Specific float representation
+	    '-1.#QNAN',  # Specific float representation
+	    '1.#IND',    # Specific float representation
+	    '1.#QNAN',   # Specific float representation
+	]
+	
+	if pd.__version__ >= '1.5':
+	    NA_VALUES = COMMON_NA_VALUES + NA_VALUES_v15plus_extra
+	else:
+	    NA_VALUES = COMMON_NA_VALUES
+
 
     # Standard pattern reps for nulls, values will be converted to nulls
     NA_PATTERNS = [
@@ -639,85 +647,106 @@ def column_is_timestamp(df, column_name, time_format):
 
 # ----------------------------------------------------------------------------------
 
-def infer_datetime_column(df, column_name):
-	"""
-	Attempts to convert a pandas or pyspark.pandas column to a datetime
-	type, handling various formats and edge cases.
-	"""
-	is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
-	series_for_processing = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
-	orig_series = series_for_processing.copy()
+def is_likely_datetime_col(colname):
+    """
+    Checks if a column name is suggestive of a date/time/timestamp.
 
-	# If the column is already a datetime type, return it immediately.
-	if pd.api.types.is_datetime64_any_dtype(series_for_processing):
-		return df[column_name] if is_spark_pandas else orig_series
+    Parameters
+    ----------
+    colname : str
+        The column name to check.
 
-	# Define a threshold for successful conversion to avoid false positives.
-	conversion_threshold = 0.98
-
-	# handle numeric Excel serial dates ---
-	if pd.api.types.is_numeric_dtype(series_for_processing):
-		non_null_count = series_for_processing.dropna().count()
-		
-		if non_null_count > 0:
-			is_plausible_date = (series_for_processing > 1).all() and (series_for_processing < 100000).all()
-
-			if is_plausible_date:
-				try:
-					converted_series = pd.to_datetime(series_for_processing,
-						origin='1899-12-30',
-						unit='D',
-						errors='coerce')
-					
-					successfully_converted_count = converted_series.dropna().count()
-					if successfully_converted_count / non_null_count >= conversion_threshold:
-						return ps.Series(converted_series) if is_spark_pandas else converted_series
-				except Exception:
-					pass
-
-	# handle string-based dates with a multi-stage approach ---
-	elif pd.api.types.is_string_dtype(series_for_processing):
-		non_null_values = series_for_processing.dropna()
-		non_null_count = non_null_values.count()
-		
-		if non_null_count > 0:
-			# Re-check against common numeric string patterns before proceeding.
-			inferred_type = check_all_int(non_null_values)
-			if inferred_type not in ['str', 'object']:
-				return df[column_name] if is_spark_pandas else orig_series
-			
-			# Attempt conversion using predefined formats
-			common_formats = Config.COMMON_DATES + Config.COMMON_DATETIMES 
-			for fmt in common_formats:
-				try:
-					# Use pd.to_datetime with the specific format
-					converted_series = pd.to_datetime(non_null_values, format=fmt, errors='raise')
-					
-					successfully_converted_count = converted_series.dropna().count()
-					if successfully_converted_count / non_null_count >= conversion_threshold:
-						combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
-						combined_series.loc[converted_series.index] = converted_series
-						return ps.Series(combined_series) if is_spark_pandas else combined_series
-				except (ValueError, TypeError):
-					continue # Try the next format
-
-			# Use the flexible dateutil parser for any other format
-			def try_dateutil_parser(x):
-				try:
-					return dt_parser.parse(x)
-				except (ValueError, TypeError):
-					return None
-
-			converted_series = non_null_values.apply(try_dateutil_parser)
-			combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
-			combined_series.loc[converted_series.index] = converted_series
-
-			successfully_converted_count = combined_series.dropna().count()
-			if successfully_converted_count / non_null_count >= conversion_threshold:
-				return ps.Series(combined_series) if is_spark_pandas else combined_series
-
-	return df[column_name] if is_spark_pandas else orig_series
+    Returns
+    -------
+    bool
+        True if the column name contains a keyword indicating date/time/timestamp.
+    """
+    colname_lc = str(colname).lower()
+    return any(keyword in colname_lc for keyword in Config.DATE_COL_KEYWORDS)
 	
+# ----------------------------------------------------------------------------------
+
+def infer_datetime_column(df, column_name):
+    """
+    Attempts to convert a DataFrame column to datetime type when appropriate.
+
+    For numeric columns (potential Excel serial dates), conversion is only attempted if the column name is suggestive of a date or time field.
+    For string columns, strict formats defined by Config are always tested; flexible parsing via dateutil is only used if the column name is suggestive.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame or pyspark.pandas.DataFrame
+        DataFrame containing the column to evaluate for datetime conversion.
+    column_name : str
+        The column name to attempt conversion.
+
+    Returns
+    -------
+    pandas.Series or pyspark.pandas.Series
+        Converted column (dtype datetime64) if inference was successful; otherwise, the original column.
+    """
+    is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
+    series_for_processing = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
+    orig_series = series_for_processing.copy()
+
+    # Return immediately if the column is already of a datetime type
+    if pd.api.types.is_datetime64_any_dtype(series_for_processing):
+        return df[column_name] if is_spark_pandas else orig_series
+
+    # Handle numeric columns (Excel serial dates) only if the column name is suggestive of a date/time attribute
+    if pd.api.types.is_numeric_dtype(series_for_processing):
+        if is_likely_datetime_col(column_name):
+            non_null_count = series_for_processing.dropna().count()
+            if non_null_count > 0:
+                is_plausible_date = (series_for_processing > 1).all() and (series_for_processing < 100000).all()
+                if is_plausible_date:
+                    try:
+                        converted_series = pd.to_datetime(
+                            series_for_processing,
+                            origin='1899-12-30', unit='D', errors='coerce'
+                        )
+                        successfully_converted_count = converted_series.dropna().count()
+                        if successfully_converted_count / non_null_count >= 0.98:
+                            return ps.Series(converted_series) if is_spark_pandas else converted_series
+                    except Exception:
+                        pass
+        # If the column name is not suggestive or conversion fails, return the original column
+        return df[column_name] if is_spark_pandas else orig_series
+
+    # For string columns, always attempt conversion using strict formats; use flexible parsing only if the column name is suggestive
+    elif pd.api.types.is_string_dtype(series_for_processing):
+        non_null_values = series_for_processing.dropna()
+        non_null_count = non_null_values.count()
+        if non_null_count > 0:
+            # Attempt conversion using predefined strict date formats
+            for fmt in getattr(Config, "COMMON_DATES", []) + getattr(Config, "COMMON_DATETIMES", []):
+                try:
+                    converted_series = pd.to_datetime(non_null_values, format=fmt, errors='raise')
+                    successfully_converted_count = converted_series.notnull().sum()
+                    if successfully_converted_count == non_null_count:
+                        combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
+                        combined_series.loc[converted_series.index] = converted_series
+                        return ps.Series(combined_series) if is_spark_pandas else combined_series
+                except (ValueError, TypeError):
+                    continue
+            # If strict format conversion fails, apply flexible parsing only for suggestive column names
+            if is_likely_datetime_col(column_name):
+                def try_dateutil_parser(x):
+                    try:
+                        return dt_parser.parse(x)
+                    except (ValueError, TypeError):
+                        return None
+                converted_series = non_null_values.apply(try_dateutil_parser)
+                combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
+                combined_series.loc[converted_series.index] = converted_series
+                successfully_converted_count = combined_series.dropna().count()
+                if successfully_converted_count / non_null_count >= 0.98:
+                    return ps.Series(combined_series) if is_spark_pandas else combined_series
+        # If conversion is not successful, return the original column
+        return df[column_name] if is_spark_pandas else orig_series
+
+    # For all other column types, return the original column
+    return df[column_name] if is_spark_pandas else orig_series
 # ----------------------------------------------------------------------------------
 
 def detect_file_encoding(file_path):
@@ -1231,196 +1260,216 @@ def read_spreadsheet_with_params(file_path,
 
 #----------------------------------------------------------------------------------
 
-def read_df_with_optimal_dtypes(file_path,
-                                 sheet_name=None,
-                                 rm_newlines=True,
-                                 replace_char='',
-                                 na_values=Config.NA_VALUES,
-                                 na_patterns=Config.NA_PATTERNS):
-	"""
-	Infers optimal data types for a DataFrame or read, preserving
-	the best datatype for each column including leading zeros,
-	boolean, strings, dates, ints, floats, etc.
+def read_df_with_optimal_dtypes(
+    file_path,
+    sheet_name=None,
+    rm_newlines=True,
+    replace_char='',
+    na_values=None,
+    na_patterns=None
+):
+    """
+    Infers optimal data types for a DataFrame read, preserving
+    the most appropriate dtype for each column including leading zeros,
+    booleans, strings, dates, integers, floats, etc.
 
-	Parameters
-	----------
-	file_path (str):
-		File path to the CSV, XLSX, or XLS file.
-	sheet_name (str, optional):
-		The name of the sheet to read from an Excel file
-		(default: None, reads the first sheet).
-	rm_newlines (bool, optional):
-		If True, removes newline characters from the data
-		(default: True).
-	replace_char (str, optional):
-		The character to replace newline characters with
-		(default: empty string "").
-	na_values: (Optional)
-		List of values to consider nulls in addition to standard nulls.
-		(default: None)
-	na_patterns: (Optional)
-		List of regular expressions to identify strings representing missing values.
-		(default: None)
-		
-	Returns
-	-------
-	df (pandas.DataFrame or pyspark.pandas.DataFrame):
-		A DataFrame with inferred data types.
-	"""
-	# Initialize empty data type dictionary
-	dtypes = {}
+    Parameters
+    ----------
+    file_path : str
+        File path to the CSV, XLSX, or XLS file.
+    sheet_name : str, optional
+        Name of the sheet to read from an Excel file (default: None, reads the first sheet).
+    rm_newlines : bool, optional
+        If True, removes newline characters from the data (default: True).
+    replace_char : str, optional
+        The character to replace newline characters with (default: empty string "").
+    na_values : list or None, optional
+        List of values to consider nulls in addition to standard nulls.
+        If None, uses Config.NA_VALUES.
+    na_patterns : list or None, optional
+        List of regex patterns identifying strings representing missing values.
+        If None, uses Config.NA_PATTERNS.
 
-	# Use the appropriate path conversion
-	if Config.USE_PYSPARK:
-		file_path = to_dbfs_path(file_path)
-	else:
-		file_path = db_path_to_local(file_path)
+    Returns
+    -------
+    pandas.DataFrame or pyspark.pandas.DataFrame
+        DataFrame with inferred data types per column.
+    """
+    # Ensure NA values and patterns are set from config if not provided
+    if na_values is None:
+        na_values = Config.NA_VALUES
+    if na_patterns is None:
+        na_patterns = Config.NA_PATTERNS
+
+    # Path conversion based on engine
+    if Config.USE_PYSPARK:
+        # Convert local path to DBFS path for PySpark
+        file_path = to_dbfs_path(file_path)
+    else:
+        # Convert DBFS or cloud path to local path for pandas
+        file_path = db_path_to_local(file_path)
+
+    # Initial read: attempt to detect all null-like values in the data
+    df = read_spreadsheet_with_params(file_path, sheet_name, str, na_values)
+    read_as_na = na_values.copy()
+    for col in df.columns:
+        null_p_vals = [
+            v for v in df[col].unique().tolist()
+            if check_na_value(v, na_values=na_values, na_patterns=na_patterns)
+            and not pd.isna(v)
+        ]
+        if null_p_vals:
+            read_as_na.extend(list(set(null_p_vals)))
+    read_as_na = list(set(read_as_na))
+
+    # Initialize dtype dictionary for each column
+    dtypes = {}
+
+    # Attempt Spark-based inference if enabled
+    if Config.USE_PYSPARK:
+        try:
+            # Read spreadsheet into Spark DataFrame
+            spark_df = spark_read_spreadsheet(file_path, sheet_name=sheet_name, na_values=read_as_na)
+            for col in spark_df.columns:
+                spark_dtype = spark_df.schema[col].dataType.simpleString()
+                # Prefer Spark's datetime inference if available
+                if 'timestamp' in spark_dtype or 'date' in spark_dtype:
+                    dtypes[col] = 'datetime64[ns]'
+                else:
+                    dtypes[col] = str
+        except Exception:
+            # If Spark read fails, fallback to pandas logic below
+            pass
+
+    # Fallback pandas-based inference (always performed for robustness)
+    df = read_spreadsheet_with_params(file_path, sheet_name, str, read_as_na)
+    for col in df.columns:
+        # If Spark already determined date type, retain it
+        if 'date' in str(dtypes.get(col)):
+            continue
+
+        non_null_values = get_non_null_values(df[col])
+
+        # Type inference logic per column
+        if len(non_null_values) == 0:
+            # All nulls: default to object
+            dtype_str = "Null-Unknown"
+        elif identify_leading_zeros(non_null_values):
+            # Leading zeros: preserve as string to avoid data loss
+            dtype_str = "String"
+        else:
+            # Use robust data type inference for all other columns
+            dtype_str = infer_data_types(non_null_values)
+
+        # Map canonical type string to appropriate pandas dtype
+        if dtype_str == "Null-Unknown":
+            dtypes[col] = object
+        elif dtype_str == "Boolean":
+            dtypes[col] = bool
+        elif dtype_str == "Integer":
+            dtypes[col] = "Int64"
+        elif dtype_str == "Float":
+            dtypes[col] = "Float64"
+        elif dtype_str == "Datetime":
+            dtypes[col] = "datetime64[ns]"
+        else:
+            # Default case: treat as string
+            dtypes[col] = str
+
+    # Final read: apply inferred dtypes for optimal loading
+    df = read_spreadsheet_with_params(
+        file_path,
+        sheet_name,
+        dtypes,
+        read_as_na
+    )
+
+    # Final pass: attempt datetime inference for columns still typed as string
+    # This ensures columns missed in initial inference are caught
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        try:
+            for col in df.columns:
+                if pd.api.types.is_string_dtype(df[col]):
+                    df[col] = infer_datetime_column(df, col)
+        except Exception:
+            # If any error occurs, leave the column as is
+            pass
+
+    return df
 	
-	# Read the sheet without specifying initial data types to find nulls
-	df = read_spreadsheet_with_params(file_path, sheet_name, str, na_values)
-
-	read_as_na = na_values.copy()
-	for col in df.columns:
-		null_p_vals = [v for v in df[col].unique().tolist()
-						if check_na_value(v,
-							na_values=na_values,
-							na_patterns=na_patterns)
-						and not pd.isna(v)]
-		if null_p_vals:
-			read_as_na.extend(list(set(null_p_vals)))
-	read_as_na = list(set(read_as_na))
-	
-	if Config.USE_PYSPARK:
-		# Use Spark to infer dtypes. 
-		try:
-			# Assume spark_read_spreadsheet is a function that reads a file into a Spark DataFrame.
-			spark_df = spark_read_spreadsheet(file_path, sheet_name=sheet_name, na_values=read_as_na)
-			
-			for col in spark_df.columns:
-				spark_dtype = spark_df.schema[col].dataType.simpleString()
-				
-				# if Spark inferred a date or timestamp, use that dtype.
-				if 'timestamp' in spark_dtype or 'date' in spark_dtype:
-					dtypes[col] = 'datetime64[ns]'
-				else:
-					# default to string 
-					dtypes[col] = str
-					
-		except Exception:
-			pass
-	
-
-	# Existing pandas-based logic for building the dtypes dictionary.
-	# This is the code that will run if Spark is not enabled or if the Spark read fails.
-	df = read_spreadsheet_with_params(file_path, sheet_name, str, read_as_na)
-	
-	for col in df.columns:
-		#if spark determined it is a datatime, reatin it 
-		if 'date' in str(dtypes.get(col)):
-			continue
-		non_null_values = get_non_null_values(df[col])
-		
-		if len(non_null_values) == 0:
-			dtypes[col] = object
-		elif identify_leading_zeros(non_null_values):
-			dtypes[col] = str
-		elif pd.api.types.is_bool_dtype(non_null_values):
-			dtypes[col] = bool
-		elif pd.api.types.is_numeric_dtype(non_null_values):
-			dtypes[col] = check_all_int(non_null_values)
-		elif pd.api.types.is_string_dtype(non_null_values) or pd.api.types.is_categorical_dtype(non_null_values):
-			dtypes[col] = check_all_int(non_null_values)
-		else:
-			dtypes[col] = str
-
-
-	# Read the data one last time with the complete dtypes dictionary.
-	df = read_spreadsheet_with_params(file_path,
-		sheet_name,
-		dtypes,
-		read_as_na)
-	
-	# The datetime inference loop is now a fallback, not the primary method.
-	with warnings.catch_warnings():
-		warnings.simplefilter("ignore", RuntimeWarning)
-		try:
-			for col in df.columns:
-				# only attempt datetime inference if the column is a string
-				if pd.api.types.is_string_dtype(df[col]):
-					df[col] = infer_datetime_column(df, col)
-		except:
-			pass # leave it be
-
-	return df
 #---------------------------------------------------------------------------------- 
 
 def infer_data_types(series):
-	"""
-	Documents the most likely data type of a pandas or Spark Series based on 
-	the non-null values in the series/column.
+    """
+    Robustly infers the data type of a pandas or Spark Series using
+    enhanced null and datetime detection logic. Returns canonical strings.
 
-	Parameters
-	----------
-	series (pandas.Series or pyspark.pandas.Series): 
-		The series/column to analyze.
+    Parameters
+    ----------
+    series (pandas.Series or pyspark.pandas.Series): 
+        The series/column to analyze.
 
-	Returns
-	-------
-	str: 
-		The name of the data type, including the values:
-		"Null-Unknown", "Boolean", "Integer", "Float", 
-		"Datetime", "String", or "Other".
-	"""
-	is_spark_pandas = isinstance(series, ps.Series)
-	
-	if is_spark_pandas:
-		series_for_processing = series
-	else:
-		series_for_processing = series
-		
-	# if the returned series has a datetime type
-		if "datetime" in str(series.dtype) or "date" in str(series.dtype):
-			return "Datetime"
-	non_null_values = series_for_processing.dropna()
+    Returns
+    -------
+    str: 
+        One of "Null-Unknown", "Boolean", "Integer", "Float", 
+        "Datetime", "String", or "Other".
+    """
 
-	if non_null_values.count() == 0:
-		return "Null-Unknown"
-	else:
-		dtype = str(non_null_values.dtype)
-		if dtype == "bool":
-			return "Boolean"
-		elif dtype in ["int8", "int16", "int32", "int64", "Int64"]:
-			return "Integer"
-		elif dtype in ["float16", "float32", "float64", "Float64"]:
-			return "Float"
-		elif "datetime" in dtype or "date" in dtype:
-			return "Datetime"
-		elif dtype == "object" or dtype == "string":
-			# Use the robust check_all_int function to infer numeric types
-			inferred_type = check_all_int(series_for_processing)
-			if inferred_type == 'Int64':
-				return "Integer"
-			elif inferred_type == 'Float64':
-				return "Float"
-			# If not a numeric type, then check for datetime using a robust check
-			else:
-				# Create a dummy df for the infer_datetime_column function.
-				if is_spark_pandas:
-					df_temp = series_for_processing.to_frame()
-				else:
-					df_temp = pd.DataFrame({series_for_processing.name: series_for_processing})
-				
-				# Call infer_datetime_column and get the returned series
-				result_series = infer_datetime_column(df_temp, series_for_processing.name)
+    # Detect Spark pandas
+    is_spark_pandas = 'pyspark.pandas.frame.Series' in str(type(series))
+    series_for_processing = series.to_pandas() if is_spark_pandas else series
 
-				# Check if the returned series has a datetime type
-				if "datetime" in str(result_series.dtype) or "date" in str(result_series.dtype):
-					return "Datetime"
-				# Otherwise, the type is a String.
-				else:
-					return "String"
-		else:
-			return "Other"
+    # Robust null detection using Config
+    null_types = set(getattr(Config, "NA_VALUES", []))
+    null_patterns = getattr(Config, "NA_PATTERNS", [])
+    values = series_for_processing.astype(str)
+    value_null_mask = values.isin(null_types)
+    pattern_null_mask = values.str.match('|'.join(null_patterns), na=False) if null_patterns else False
+    mask = value_null_mask | pattern_null_mask | series_for_processing.isnull()
+
+    non_null_series = series_for_processing[~mask]
+
+    if non_null_series.count() == 0:
+        return "Null-Unknown"
+
+    # Datetime detection using robust function
+    # Must create a DataFrame for infer_datetime_column!
+    if is_spark_pandas:
+        df_temp = series_for_processing.to_frame()
+    else:
+        df_temp = pd.DataFrame({series_for_processing.name: series_for_processing})
+    result_series = infer_datetime_column(df_temp, series_for_processing.name)
+    result_dtype = str(result_series.dtype)
+    if "datetime" in result_dtype or "date" in result_dtype:
+        valid_ratio = result_series.notnull().mean()
+        if valid_ratio > 0.7:
+            return "Datetime"
+
+    # Boolean detection
+    if pd.api.types.is_bool_dtype(non_null_series):
+        return "Boolean"
+
+    # Integer detection
+    if pd.api.types.is_integer_dtype(non_null_series):
+        return "Integer"
+
+    # Float detection
+    if pd.api.types.is_float_dtype(non_null_series):
+        return "Float"
+
+    # Object or string: use check_all_int for numeric detection in string columns
+    if pd.api.types.is_object_dtype(non_null_series) or pd.api.types.is_string_dtype(non_null_series):
+        inferred_type = check_all_int(non_null_series)
+        if inferred_type == 'Int64':
+            return "Integer"
+        elif inferred_type == 'Float64':
+            return "Float"
+        else:
+            return "String"
+
+    return "Other"
 			
 #---------------------------------------------------------------------------------- 
 
