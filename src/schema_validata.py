@@ -3236,7 +3236,7 @@ def extract_all_table_names(sql_statement: str) -> list[str]:
 
 #----------------------------------------------------------------------------------
 
-def get_all_columns_from_sql(sql_statement):
+def get_all_columns_from_sql(sql_statement, include_select_all=True):
     """
     Extracts all unique column names and aliases referenced in a SQL statement, preserving their order of appearance.
 
@@ -3251,6 +3251,10 @@ def get_all_columns_from_sql(sql_statement):
     ----------
     sql_statement : str
         The SQL query string to be analyzed.
+    include_select_all : bool, optional
+        If True, all columns refenced in the * will be retuned
+        If False, only columns explicilty referenced in the sql statement will be returned.
+        Default is True.
 
     Returns
     -------
@@ -3298,14 +3302,15 @@ def get_all_columns_from_sql(sql_statement):
                 sql_from_clause = from_exp.sql()
                 tables_in_from_clause = extract_all_table_names(sql_from_clause)
 
-                for base_table_name in tables_in_from_clause:
+                for table_name in tables_in_from_clause:
                     try:
                         # Query Spark's catalog for the table schema using the full name
-                        df = Config.SPARK_SESSION.table(base_table_name)
+                        df = Config.SPARK_SESSION.table(table_name)
                         for col in df.columns:
                             add_to_list(col)
                     except Exception as e:
-                        print(f"Warning: Could not retrieve schema for table '{base_table_name}': {e}")
+                        print(f"Warning: Could not retrieve schema for table '{table_name}': {e}")
+
     #    'WITH' clauses are resolved before they are referenced in the main query.
     if isinstance(parsed_query, With):
         for cte_exp in parsed_query.expressions:
@@ -3323,7 +3328,7 @@ def get_all_columns_from_sql(sql_statement):
     final_select_exp = main_query_ast.find(Select)
     if final_select_exp:
         for expr in final_select_exp.expressions:
-            if isinstance(expr, Star):
+            if isinstance(expr, Star) and include_select_all:
                 # If a '*' is found in the final SELECT, resolve it.
                 resolve_stars(final_select_exp)
             else:
@@ -3464,7 +3469,7 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
         if missing_tables:
             raise ValueError(f"The following tables from {sql_statement} do not exist in the catalog: {missing_tables}")
 
-        # Find all unique columns in the entire query
+        # Find all unique columns in the query
         sql_ref_cols = get_all_columns_from_sql(sql_statement)
 
         # Execute the modified SQL statement
@@ -3490,6 +3495,8 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
                 if sql_ref_cols is None:
                     row_dict_str = str({col: row[col] for col in row.index})
                 else:
+                    if unique_column not in sql_ref_cols:
+                        sql_ref_cols = sql_ref_cols + [unique_column]
                     row_dict_str = str({col: row[col] for col in sql_ref_cols if col in row.index})
                 results.append({
                     "Primary_table": primary_table,
