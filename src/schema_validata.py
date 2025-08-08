@@ -122,10 +122,10 @@ class Config:
         False   : "Informational/Warning",  
     }
 
-	DATE_COL_KEYWORDS = [
-	    'date', 'time', 'datetime', 'timestamp', 'dob', 'dt', 
-		'created', 'modified', 'updated', 'birthday', 'event_time'
-	]
+    DATE_COL_KEYWORDS = [
+    					'date', 'time', 'datetime', 'timestamp', 'dob', 'dt', 
+						'created', 'modified', 'updated', 'birthday', 'event_time'
+    ]
 
     # Common US & ISO timestamp formats
     COMMON_TIMESTAMPS = [
@@ -137,7 +137,7 @@ class Config:
                         # Common International and ISO Standard Date Formats (ISO 8601)
                         "%H:%M:%S",    # 24-Hour Time (24-hour clock, US Military, Technical)
                         "%H:%M:%S %p"  # 24-Hour Time with AM/PM
-                        ]
+    ]
 
     # Common US & ISO date/datetime formats
     COMMON_DATETIMES = [
@@ -163,10 +163,10 @@ class Config:
                         # ISO Standard Date Time Formats (ISO 8601)
                         "%Y-%m-%dT%H:%M:%SZ", # Combined Date and Time with Zulu Time (Specific Use Cases)
                         "%Y-%m-%dT%H:%M:%S%z", # Combined Date and Time with Offset (Rare)
-                        ]
+    ]
 
-	# Common null/missing value representations
-	COMMON_NA_VALUES = [
+    # Common null/missing value representations
+    COMMON_NA_VALUES = [
 	    '',           # Empty string
 	    ' ',          # Single space
 	    'N/A',        # Common missing value
@@ -191,21 +191,21 @@ class Config:
 	    '#DIV/0!',    # Excel division by zero error
 	    'missing',    # Lowercase missing
 	    'Missing',    # Capitalized missing
-	]
+    ]
 	
-	# Additional values unique to pandas >= 1.5
-	NA_VALUES_v15plus_extra = [
+    # Additional values unique to pandas >= 1.5
+    NA_VALUES_v15plus_extra = [
 	    '#N/A N/A',  # Less standard combination
 	    '-1.#IND',   # Specific float representation
 	    '-1.#QNAN',  # Specific float representation
 	    '1.#IND',    # Specific float representation
 	    '1.#QNAN',   # Specific float representation
-	]
+    ]
 	
-	if pd.__version__ >= '1.5':
-	    NA_VALUES = COMMON_NA_VALUES + NA_VALUES_v15plus_extra
-	else:
-	    NA_VALUES = COMMON_NA_VALUES
+    if pd.__version__ >= '1.5':
+    	NA_VALUES = COMMON_NA_VALUES + NA_VALUES_v15plus_extra
+    else:
+    	NA_VALUES = COMMON_NA_VALUES
 
 
     # Standard pattern reps for nulls, values will be converted to nulls
