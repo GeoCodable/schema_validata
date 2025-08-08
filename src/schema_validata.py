@@ -194,7 +194,7 @@ class Config:
     ]
 	
     # Additional values unique to pandas >= 1.5
-    NA_VALUES_v15plus_extra = [
+    NA_VALUES_v1.5 = [
 	    '#N/A N/A',  # Less standard combination
 	    '-1.#IND',   # Specific float representation
 	    '-1.#QNAN',  # Specific float representation
@@ -203,13 +203,13 @@ class Config:
     ]
 	
     if pd.__version__ >= '1.5':
-    	NA_VALUES = COMMON_NA_VALUES + NA_VALUES_v15plus_extra
+    	NA_VALUES = COMMON_NA_VALUES + NA_VALUES_v1.5
     else:
     	NA_VALUES = COMMON_NA_VALUES
 
 
     # Standard pattern reps for nulls, values will be converted to nulls
-    Config.NA_PATTERNS = [
+    NA_PATTERNS = [
         r'^\s*NOT\s{0,1}(?:\s|_|-|/|\\|/){1}\s{0,1}AVAILABLE\s*$',
         r'^\s*N\s{0,1}(?:\s|_|-|/|\\|/){1}\s{0,1}A\s*$',
         r'^\s*(?:\s|_|-|/|\\|/){1}\s*$',
