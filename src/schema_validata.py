@@ -217,8 +217,8 @@ class Config:
     ]
 
     # property set to either include all columns in the data integrty output with *
-    # or just the columns ecplicitly refernced in the sql queries
-    Config.include_select_all = True
+    # or just the columns ecplicitly refernced in the sql queries 
+    include_select_all = True
 
     class jsonEncoder(json.JSONEncoder):
         """Custom JSON encoder class that handles serialization of NumPy data types
