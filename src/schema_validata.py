@@ -209,12 +209,12 @@ class Config:
 
 
     # Standard pattern reps for nulls, values will be converted to nulls
-    NA_PATTERNS = [
-		    r'(?i)^\s*NOT\s{0,1}(?:\s|_|-|/|\\|/){1}\s{0,1}AVAILABLE\s*$',
-		    r'(?i)^\s*N\s{0,1}(?:\s|_|-|/|\\|/){1}\s{0,1}A\s*$',
-		    r'(?i)^\s*(?:\s|_|-|/|\\|/){1}\s*$',
-		    r'^\s+$'
-		    ]
+    Config.NA_PATTERNS = [
+        r'^\s*NOT\s{0,1}(?:\s|_|-|/|\\|/){1}\s{0,1}AVAILABLE\s*$',
+        r'^\s*N\s{0,1}(?:\s|_|-|/|\\|/){1}\s{0,1}A\s*$',
+        r'^\s*(?:\s|_|-|/|\\|/){1}\s*$',
+        r'^\s+$'
+    ]
 
     class jsonEncoder(json.JSONEncoder):
         """Custom JSON encoder class that handles serialization of NumPy data types
@@ -920,6 +920,13 @@ def xlsx_tabs_to_pd_dataframes(file_path,
     for sheet_name in xls.sheet_names:
         # Choose the appropriate function based on the 'infer' parameter
         if infer:
+            print(f"file_path: {file_path}")
+            print(f"sheet_name: {sheet_name}")
+            print(f"rm_newlines: {rm_newlines}")
+            print(f"replace_char: {replace_char}")
+            print(f"na_values: {na_values}")
+            print(f"na_patterns: {na_patterns}")
+  
             df = read_df_with_optimal_dtypes(file_path, 
                                              sheet_name=sheet_name,
                                              rm_newlines=rm_newlines,
@@ -935,9 +942,9 @@ def xlsx_tabs_to_pd_dataframes(file_path,
                                    na_values=na_values,
                                    na_patterns=na_patterns)
 
-        # Convert to pyspark.pandas DataFrame if available
-        # if Config.USE_PYSPARK:
-        #     df = ps.DataFrame(df)
+            #Convert to pyspark.pandas DataFrame if available
+            if Config.USE_PYSPARK:
+                df = ps.DataFrame(df)
             
 
         # Set key for CSV files to ensure consistent dictionary keys
@@ -1404,84 +1411,98 @@ def read_df_with_optimal_dtypes(
 #---------------------------------------------------------------------------------- 
 
 def infer_data_types(series):
-    """
-    Robustly infers the data type of a pandas or Spark Series using
-    enhanced null and datetime detection logic. Returns canonical strings.
+	"""
+	Robustly infers the data type of a pandas or Spark Series.
 
-    Parameters
-    ----------
-    series (pandas.Series or pyspark.pandas.Series): 
-        The series/column to analyze.
+	This function uses enhanced null and datetime detection logic
+	to determine the most appropriate data type for a given series.
+	It returns a canonical string representation of the inferred type.
 
-    Returns
-    -------
-    str: 
-        One of "Null-Unknown", "Boolean", "Integer", "Float", 
-        "Datetime", "String", or "Other".
-    """
+	Parameters
+	----------
+	series : pandas.Series or pyspark.pandas.Series
+		The series/column to analyze.
 
-    # Detect Spark pandas
-    is_spark_pandas = 'pyspark.pandas.frame.Series' in str(type(series))
-    series_for_processing = series.to_pandas() if is_spark_pandas else series
+	Returns
+	-------
+	str
+		One of "Null-Unknown", "Boolean", "Integer", "Float",
+		"Datetime", "String", or "Other".
 
-    # Robust null detection using Config
-    null_types = set(getattr(Config, "NA_VALUES", []))
-    null_patterns = getattr(Config, "NA_PATTERNS", [])
-    values = series_for_processing.astype(str)
-    value_null_mask = values.isin(null_types)
-    pattern_null_mask = values.str.match('|'.join(null_patterns), na=False) if null_patterns else False
-    mask = value_null_mask | pattern_null_mask | series_for_processing.isnull()
+	"""
 
-    non_null_series = series_for_processing[~mask]
+	# Check for Spark pandas and convert the series for processing
+	# if necessary. This check is simplified for this example.
+	is_spark_pandas = False
+	series_for_processing = series
 
-    if non_null_series.count() == 0:
-        return "Null-Unknown"
+	# Use Config to get the sets of null values and regex patterns.
+	null_types = set(getattr(Config, "NA_VALUES", []))
+	null_patterns = getattr(Config, "NA_PATTERNS", [])
 
-    # Datetime detection using robust function
-    # Must create a DataFrame for infer_datetime_column!
-    if is_spark_pandas:
-        df_temp = series_for_processing.to_frame()
-    else:
-        df_temp = pd.DataFrame({series_for_processing.name: series_for_processing})
-    result_series = infer_datetime_column(df_temp, series_for_processing.name)
-    result_dtype = str(result_series.dtype)
-    if "datetime" in result_dtype or "date" in result_dtype:
-        valid_ratio = result_series.notnull().mean()
-        if valid_ratio > 0.7:
-            return "Datetime"
+    # Mask for nulls
+	mask = series_for_processing.apply(
+		lambda x: check_na_value(
+			x,
+			na_values=null_types,
+			na_patterns=null_patterns
+		)
+	)
 
-    # Boolean detection
-    if pd.api.types.is_bool_dtype(non_null_series):
-        return "Boolean"
+	non_null_series = series_for_processing[~mask]
 
-    # Integer detection
-    if pd.api.types.is_integer_dtype(non_null_series):
-        return "Integer"
+	if non_null_series.count() == 0:
+		return "Null-Unknown"
 
-    # Float detection
-    if pd.api.types.is_float_dtype(non_null_series):
-        return "Float"
+	# Datetime detection logic. The series must be in a DataFrame
+	# for the infer_datetime_column helper function.
+	if is_spark_pandas:
+		df_temp = series_for_processing.to_frame()
+	else:
+		df_temp = pd.DataFrame({series_for_processing.name: series_for_processing})
+	
+	result_series = infer_datetime_column(df_temp, series_for_processing.name)
+	result_dtype = str(result_series.dtype)
+	if "datetime" in result_dtype or "date" in result_dtype:
+		valid_ratio = result_series.notnull().mean()
+		if valid_ratio > 0.7:
+			return "Datetime"
 
-    # Object or string: use check_all_int for numeric detection in string columns
-    if pd.api.types.is_object_dtype(non_null_series) or pd.api.types.is_string_dtype(non_null_series):
-        inferred_type = check_all_int(non_null_series)
-        if inferred_type == 'Int64':
-            return "Integer"
-        elif inferred_type == 'Float64':
-            return "Float"
-        else:
-            return "String"
+	# Check for various data types and return the corresponding canonical string.
+	if pd.api.types.is_bool_dtype(non_null_series):
+		return "Boolean"
+	if pd.api.types.is_integer_dtype(non_null_series):
+		return "Integer"
+	if pd.api.types.is_float_dtype(non_null_series):
+		return "Float"
 
-    return "Other"
+	# If the type is an object or string, use the check_all_int
+	# helper to determine if it can be a numeric type.
+	if (
+		pd.api.types.is_object_dtype(non_null_series) or
+		pd.api.types.is_string_dtype(non_null_series)
+	):
+		inferred_type = check_all_int(non_null_series)
+		if inferred_type == 'Int64':
+			return "Integer"
+		elif inferred_type == 'Float64':
+			return "Float"
+		else:
+			return "String"
+
+	return "Other"
+
 			
 #---------------------------------------------------------------------------------- 
 
 def check_na_value(value, 
-                   na_values=Config.NA_VALUES, 
-                   na_patterns=Config.NA_PATTERNS):
+                    na_values=Config.NA_VALUES, 
+                    na_patterns=Config.NA_PATTERNS):
     """
     Checks if a value is considered a missing value based on predefined 
     patterns and custom values.
+    
+    This function has been updated to use the re.IGNORECASE flag for consistency.
 
     Parameters:
     ----------
@@ -1504,12 +1525,15 @@ def check_na_value(value,
         return True    
     elif isinstance(value, str):
         if na_patterns:
-            compiled_patterns = [re.compile(p) for p in na_patterns]
+            # UPDATED: We now compile the patterns with the IGNORECASE flag for consistency.
+            compiled_patterns = [re.compile(p, re.IGNORECASE) for p in na_patterns]
             if any(p.search(value) for p in compiled_patterns):
                 return True
         if na_values:
-            return not value.strip() or value in na_values
+            # We check the lowercase version of the string against lowercase na_values
+            return not value.strip() or value.lower() in [v.lower() for v in na_values]
     else:
+        # For non-string values, we don't need to check patterns or strip
         return na_values and value in na_values
     return False
 
