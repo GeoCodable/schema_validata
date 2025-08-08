@@ -216,6 +216,10 @@ class Config:
         r'^\s+$'
     ]
 
+    # property set to either include all columns inthe data integrty output 
+    # or just the columns ecplicitly refernced in the sql queries
+    Config.include_select_all = True
+
     class jsonEncoder(json.JSONEncoder):
         """Custom JSON encoder class that handles serialization of NumPy data types
         (int64, float64, and arrays) for compatibility with JSON.
@@ -3469,7 +3473,8 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
             raise ValueError(f"The following tables from {sql_statement} do not exist in the catalog: {missing_tables}")
 
         # Find all unique columns in the query
-        sql_ref_cols = get_all_columns_from_sql(sql_statement)
+        sql_ref_cols = get_all_columns_from_sql(sql_statement, 
+                                                include_select_all=Config.include_select_all)
 
         # Execute the modified SQL statement
         spark_result = Config.SPARK_SESSION.sql(sql_statement)
