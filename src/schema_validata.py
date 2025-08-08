@@ -859,7 +859,7 @@ def read_spreadsheets(file_path,
                          parse_dates=parse_dates)
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
-    print(df)
+   
     if rm_newlines:
         df = remove_pd_df_newlines(df, replace_char=replace_char)
 
@@ -3519,7 +3519,7 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
         })
 
     return pd.DataFrame(results)
-    
+
 #---------------------------------------------------------------------------------- 
 
 # def get_rows_with_condition_sqlite(tables, sql_statement, conn, error_message, error_level='error'):
