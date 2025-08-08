@@ -1129,7 +1129,7 @@ def read_csv_or_excel_to_df(file_path,
                                                  na_values=na_values,
                                                  na_patterns=na_patterns)}
     else:
-        raise ValueError(f"Unsupported file type: {ext}")
+        raise ValueError(f"Unsupported file : {file_path} {ext}")
     #---------------------------------------------------------------------------------- 
 
 def identify_leading_zeros(df_col):
@@ -1301,13 +1301,13 @@ def read_df_with_optimal_dtypes(
     if na_patterns is None:
         na_patterns = Config.NA_PATTERNS
 
-    # Path conversion based on engine
-    if Config.USE_PYSPARK:
-        # Convert local path to DBFS path for PySpark
-        file_path = to_dbfs_path(file_path)
-    else:
-        # Convert DBFS or cloud path to local path for pandas
-        file_path = db_path_to_local(file_path)
+    # # Path conversion based on engine
+    # if Config.USE_PYSPARK:
+    #     # Convert os path to DBFS path for PySpark
+    #     spark_file_path = to_dbfs_path(file_path)
+    # else:
+    #     # Convert DBFS or cloud path to os path for pandas
+    #     file_path = db_path_to_local(file_path)
 
     # Initial read: attempt to detect all null-like values in the data
     df = read_spreadsheet_with_params(file_path, sheet_name, str, na_values)
@@ -1328,8 +1328,11 @@ def read_df_with_optimal_dtypes(
     # Attempt Spark-based inference if enabled
     if Config.USE_PYSPARK:
         try:
-            # Read spreadsheet into Spark DataFrame
-            spark_df = spark_read_spreadsheet(file_path, sheet_name=sheet_name, na_values=read_as_na)
+			# Read spreadsheet into Spark DataFrame
+			# Convert os path to DBFS path for PySpark
+			# Read spreadsheet into Spark DataFrame
+			spark_file_path = to_dbfs_path(file_path)
+            spark_df = spark_read_spreadsheet(spark_file_path, sheet_name=sheet_name, na_values=read_as_na)
             for col in spark_df.columns:
                 spark_dtype = spark_df.schema[col].dataType.simpleString()
                 # Prefer Spark's datetime inference if available
