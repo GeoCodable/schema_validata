@@ -795,7 +795,8 @@ def read_spreadsheets(file_path,
                       dtype=None, 
                       rm_newlines=True,
                       replace_char="", 
-                      na_values=None
+                      na_values=None,
+                      parse_dates=None
                       ):
     """
     Reads and processes raw data from Excel (.xlsx, .xls) or CSV (.csv) files 
@@ -845,13 +846,15 @@ def read_spreadsheets(file_path,
         df = pd.read_excel(file_path, 
                            sheet_name=sheet_name, 
                            dtype=dtype, 
-                           na_values=na_values)
+                           na_values=na_values,
+                           parse_dates=parse_dates)
     elif ext == ".csv":
         encoding=detect_file_encoding(file_path)
         df = pd.read_csv(file_path, 
                          dtype=dtype, 
                          na_values=na_values,
-                         encoding=encoding)
+                         encoding=encoding,
+                         parse_dates=parse_dates)
     else:
         raise ValueError(f"Unsupported file extension: {ext}")
 
@@ -1308,13 +1311,6 @@ def read_df_with_optimal_dtypes(
     if na_patterns is None:
         na_patterns = Config.NA_PATTERNS
 
-    # # Path conversion based on engine
-    # if Config.USE_PYSPARK:
-    #     # Convert os path to DBFS path for PySpark
-    #     spark_file_path = to_dbfs_path(file_path)
-    # else:
-    #     # Convert DBFS or cloud path to os path for pandas
-    #     file_path = db_path_to_local(file_path)
 
     # Initial read: attempt to detect all null-like values in the data
     df = read_spreadsheet_with_params(file_path, sheet_name, str, na_values)
@@ -1386,16 +1382,33 @@ def read_df_with_optimal_dtypes(
             # Default case: treat as string
             dtypes[col] = str
 
-    # Final read: apply inferred dtypes for optimal loading
-    df = read_spreadsheet_with_params(
-        file_path,
-        sheet_name,
-        dtypes,
-        read_as_na
+    # Separate datetime columns for the final read.
+    parse_dates = None
+    read_dtype = dtypes
+    if dtypes:
+        parse_dates = [
+            col for col, type_str in dtypes.items() 
+            if type_str == 'datetime64[ns]'
+        ]
+        # Only keep non-datetime columns in the dtype dictionary for reading.
+        read_dtype = {
+            col: type_str for col, type_str in dtypes.items() 
+            if type_str != 'datetime64[ns]'
+        }
+        # If no datetime columns were found, set parse_dates to None.
+        if not parse_dates:
+            parse_dates = None
+
+    # Final read: apply inferred dtypes for optimal loading.
+    df = read_spreadsheets(
+        file_path=file_path,
+        sheet_name=sheet_name,
+        dtype=read_dtype,
+        na_values=read_as_na,
+        parse_dates=parse_dates
     )
 
-    # Final pass: attempt datetime inference for columns still typed as string
-    # This ensures columns missed in initial inference are caught
+    # Final pass: attempt datetime inference for columns still typed as string.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         try:
@@ -1403,11 +1416,10 @@ def read_df_with_optimal_dtypes(
                 if pd.api.types.is_string_dtype(df[col]):
                     df[col] = infer_datetime_column(df, col)
         except Exception:
-            # If any error occurs, leave the column as is
+            # If any error occurs, leave the column as is.
             pass
 
     return df
-	
 #---------------------------------------------------------------------------------- 
 
 def infer_data_types(series):
