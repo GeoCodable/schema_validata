@@ -2258,30 +2258,41 @@ def schema_validate_allowed_values(attribute,
     # Check if the expected and observed values are lists
     if isinstance(p_errors[attribute]['expected'], list) and isinstance(
             p_errors[attribute]['observed'], list):
+
+        allowed_vals = p_errors[attribute]['expected']
+        observed_vals = p_errors[attribute]['observed']
+
+        unmatched = []
+        for obs in observed_vals:
+            matched = False
+            # Compare as strings (strip spaces)
+            obs_str = str(obs).strip()
+            for allowed in allowed_vals:
+                allowed_str = str(allowed).strip()
+                if obs_str == allowed_str:
+                    matched = True
+                    break
+            if matched:
+                continue
+            # Try datatype match (cast obs to allowed type, allow errors)
+            for allowed in allowed_vals:
+                try:
+                    if type(allowed) is str:
+                        # Already checked string match above
+                        continue
+                    if type(allowed)(obs) == allowed:
+                        matched = True
+                        break
+                except Exception:
+                    continue
+            if not matched:
+                unmatched.append(obs)
         
-        # Create sets for faster membership testing
-        allowed_vals = set(map(str, p_errors[attribute]['expected']))
-        observed_vals = set(map(str, p_errors[attribute]['observed']))
-
-        # Check if all observed values are within the allowed list
-        if not observed_vals.issubset(allowed_vals):
-            # Identify values outside the allowed list
-            err_vals = list(observed_vals - allowed_vals)
-
-            # Regular expression for integers
-            pattern = r"^-?\d+$"  # Matches integers only (no decimals)
-
-            # Filter values matching the pattern
-            int_vals = [int(v) for v in err_vals if re.match(pattern, str(v))]
-            if len(int_vals) == len(err_vals):
-                err_vals = int_vals
-
-            # Store error values for error message formatting
-            msg_vals['err_vals'] = err_vals
+        if unmatched:
+            msg_vals['err_vals'] = unmatched
             return attribute
 
     return None
-
 #---------------------------------------------------------------------------------- 
 
 def schema_validate_attribute(attribute,
@@ -2594,26 +2605,32 @@ def value_errors_unallowed(df, column_name, allowed_values, unique_column=None):
         A pandas DataFrame containing the identified errors.
     """
 
-    # Ensure allowed values have the same data type as the column
-    column_dtype = df[column_name].dtype
-    allowed_values = pd.Series(allowed_values).astype(str)
-
     # Create a copy of the DataFrame with only the necessary columns
     df_copy = subset_error_df(df, 
                             column_name=column_name, 
                             unique_column=unique_column)
 
-    # Convert the column to strings for comparison
-    
-    # df_copy.loc[:, column_name] = df_copy[column_name].astype(str)
-    df_copy = df_copy.assign(column_name=df_copy[column_name].astype(str))
+    def is_allowed(val):
+        val_str = str(val).strip()
+        # String match (stripped)
+        for allowed in allowed_values:
+            if val_str == str(allowed).strip():
+                return True
+        # Datatype match
+        for allowed in allowed_values:
+            try:
+                if type(allowed) is str:
+                    continue
+                if type(allowed)(val) == allowed:
+                    return True
+            except Exception:
+                continue
+        return False
 
-    # Create a set of allowed values for efficient lookup
-    allowed_values_set = set(str(value) for value in allowed_values)
+    # Apply the check to each value
+    mask = ~df_copy[column_name].apply(is_allowed)
 
-    # Filter the DataFrame based on the string comparison
-    filtered_df = df_copy[~df_copy[column_name].isin(allowed_values_set)]
-    del(df_copy)
+    filtered_df = df_copy[mask]
 
     # Create a list of dictionaries to store the results
     results = []
@@ -2631,8 +2648,6 @@ def value_errors_unallowed(df, column_name, allowed_values, unique_column=None):
 
     # Always return a pandas DataFrame
     return pd.DataFrame(results)
-
-
 #---------------------------------------------------------------------------------- 
 
 def value_errors_length(df, column_name, max_length, unique_column=None):
