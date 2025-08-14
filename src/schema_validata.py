@@ -2258,9 +2258,14 @@ def schema_validate_allowed_values(attribute,
     # Check if the expected and observed values are lists
     if isinstance(p_errors[attribute]['expected'], list) and isinstance(
             p_errors[attribute]['observed'], list):
-
+				
+		# get the expected values list
         allowed_vals = p_errors[attribute]['expected']
-        observed_vals = p_errors[attribute]['observed']
+				
+        # remove nulls from observed values (if allow null is false, these will already be flagged)
+        observed_clean = [v for v in p_errors[attribute]['observed']
+				            if not check_na_value(v)]
+        observed_vals = set(map(str, observed_clean))
 
         unmatched = []
         for obs in observed_vals:
@@ -2607,10 +2612,13 @@ def value_errors_unallowed(df, column_name, allowed_values, unique_column=None):
 
     # Create a copy of the DataFrame with only the necessary columns
     df_copy = subset_error_df(df, 
-                            column_name=column_name, 
-                            unique_column=unique_column)
+                              column_name=column_name, 
+                              unique_column=unique_column)
 
     def is_allowed(val):
+        # Ignore nulls as defined by check_na_value
+        if check_na_value(val):
+            return True
         val_str = str(val).strip()
         # String match (stripped)
         for allowed in allowed_values:
@@ -2621,7 +2629,7 @@ def value_errors_unallowed(df, column_name, allowed_values, unique_column=None):
             try:
                 if type(allowed) is str:
                     continue
-                if type(allowed)(val) == allowed:
+                c
                     return True
             except Exception:
                 continue
@@ -2643,10 +2651,10 @@ def value_errors_unallowed(df, column_name, allowed_values, unique_column=None):
         }
         if unique_column:
             result_dict["Lookup_Column"] = unique_column
-            result_dict["Lookup_Value" ] = row[unique_column]
+            result_dict["Lookup_Value"] = row[unique_column]
         results.append(result_dict)
 
-    # Always return a pandas DataFrame
+    # return a pandas DataFrame
     return pd.DataFrame(results)
 #---------------------------------------------------------------------------------- 
 
