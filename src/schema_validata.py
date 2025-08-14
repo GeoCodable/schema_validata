@@ -2354,7 +2354,10 @@ def schema_validate_attribute(attribute,
 
 def validate_schema(observed_schema,
                     data_dictionary,
-                    schema_mapping
+                    schema_mapping,
+                    dataset_path=None,
+                    na_values=Config.NA_VALUES, 
+                    na_patterns=Config.NA_PATTERNS
                     ):
     """
     Validates observed datasets against a data dictionary and returns 
@@ -2381,6 +2384,13 @@ def validate_schema(observed_schema,
     schema_violations = {}
     _SET = Config.SCHEMA_ERROR_TEMPLATES
 
+    if dataset_path:
+        # Read data from CSV or Excel file
+        dataframes = read_csv_or_excel_to_df(dataset_path, infer=True, 
+                                            multi_sheets=True,
+                                            na_values=na_values, 
+                                            na_patterns=na_patterns)
+        print(dataframes.keys())
     # clean up the schema_mapping dict to remove references which have not data dict defined 
     # this modifies the original dictionary supplied 
     clean_mapping = schema_mapping[:]  # Create a copy
@@ -2394,6 +2404,8 @@ def validate_schema(observed_schema,
     # Iterate over the schema_mapping object to test datasets against 
     # the given data dictionary			    
     for mapping in schema_mapping:
+        print(mapping['dataset'])
+        df = dataframes[mapping['dataset']]
         observed_dataset = mapping['dataset']
         data_dict_section = mapping['data_dict']
 
@@ -2440,6 +2452,20 @@ def validate_schema(observed_schema,
 
                         errors[atttr]['errors'] = _SET[atttr].format(**msg_vals)
 
+                # PATCH: Schema-level regex check
+                regex_pattern = col_props.get('regex_pattern')
+                if isinstance(regex_pattern, str) and regex_pattern not in Config.NA_VALUES and df is not None and col in df.columns:
+                    non_null = df[col].dropna().astype(str)
+                    mismatches = ~non_null.str.match(regex_pattern)
+                    if mismatches.any():
+                        msg_vals["expected"] = regex_pattern
+                        msg_vals["observed"] = "Some values do not match pattern"
+                        errors['Invalid Value Formatting'] = {
+                            "expected": regex_pattern,
+                            "observed": "Some values do not match pattern",
+                            "errors": Config.SCHEMA_ERROR_TEMPLATES['regex_pattern'].format(**msg_vals)
+                        }
+
             elif col_props['required']:
                 # Missing required column
                 errors = {"required_column": {
@@ -2463,7 +2489,7 @@ def validate_schema(observed_schema,
         schema_violations[observed_dataset] = {'schema_violations': v_results}
 
     return schema_violations
-
+    
 #---------------------------------------------------------------------------------- 
 
 def subset_error_df(df, column_name, unique_column=None):
