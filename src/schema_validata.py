@@ -216,6 +216,9 @@ class Config:
         r'^\s+$'
     ]
 
+    DATA_INTEGRITY_REF_COLS_ONLY = True
+
+
     class jsonEncoder(json.JSONEncoder):
         """Custom JSON encoder class that handles serialization of NumPy data types
         (int64, float64, and arrays) for compatibility with JSON.
@@ -3278,14 +3281,15 @@ def extract_all_table_names(sql_statement):
 
 def get_all_columns_from_sql(sql_statement):
     """
-    Extracts all unique column names and aliases referenced in a SQL statement, preserving their order of appearance.
+    Extracts all unique column names and aliases from a SQL statement.
 
-    This function leverages `sqlglot` to parse the SQL statement into an Abstract Syntax Tree (AST), 
-    traversing the tree to identify all explicit column references and wildcard ('*') selections. 
-    For wildcard columns, it resolves the actual column names by querying the Spark catalog for the 
-    relevant table schemas. The function is robust to complex SQL constructs, including common table 
-    expressions (CTEs) and subqueries, and ensures that the returned list contains only unique column 
-    names or aliases, maintaining their original order as encountered in the query.
+    This function parses a SQL statement into an Abstract Syntax Tree (AST)
+    using `sqlglot` to identify all referenced columns. It handles explicit
+    column selections, aliases, and complex constructs like Common Table
+    Expressions (CTEs) and subqueries. For wildcard selections ('*'), it
+    resolves the actual column names by querying the Spark catalog, ensuring
+    accurate and comprehensive results. The function preserves the order
+    of appearance while ensuring all returned column names and aliases are unique.
 
     Parameters
     ----------
@@ -3295,7 +3299,7 @@ def get_all_columns_from_sql(sql_statement):
     Returns
     -------
     list
-        An ordered list of unique column names and aliases referenced in the SQL statement.
+        An ordered list of unique column names and aliases from the SQL statement.
     """
     parsed_query = sqlglot.parse_one(sql_statement)
     all_columns = []
@@ -3303,7 +3307,7 @@ def get_all_columns_from_sql(sql_statement):
 
     def add_to_list(col_name):
         """
-        Adds a column name to the result list if it is not None and has not already been added.
+        Appends a column name to the result list if it is not already present.
 
         Parameters
         ----------
@@ -3316,12 +3320,13 @@ def get_all_columns_from_sql(sql_statement):
 
     def resolve_stars(query_ast):
         """
-        Resolves 'SELECT *' wildcards within a given AST node by expanding them to actual column names.
+        Expands 'SELECT *' wildcards into explicit column names by querying the
+        Spark catalog.
 
-        This helper function searches for `Select` expressions containing a `Star` expression. 
-        For each such occurrence, it identifies the base table(s) from the `FROM` clause, 
-        queries the Spark catalog to retrieve the full list of columns for those tables, 
-        and adds them to the result list.
+        This helper function finds `Star` expressions within a `SELECT` clause,
+        identifies the corresponding table(s) from the `FROM` clause, and
+        queries the Spark catalog for their schemas to retrieve a list of
+        all columns.
 
         Parameters
         ----------
@@ -3333,51 +3338,51 @@ def get_all_columns_from_sql(sql_statement):
                 from_exp = select_exp.args.get('from')
                 if not from_exp:
                     continue
-                
-                # Recursively find all Table expressions within the FROM clause
+
+                # recursively find all Table expressions within the FROM clause
                 for table_exp in from_exp.find_all(Table):
-                    # Use .name to get the base table name without aliases
-                    base_table_name = table_exp.name
+                    # use sqlglot's sql method to get the fully qualified name
+                    # for accurate catalog lookups.
                     fully_qualified_table_name = table_exp.sql(dialect="databricks")
                     try:
-                        # Query Spark's catalog for the table schema using the fully qualified name
+                        # query Spark's catalog for the table schema
                         df = Config.SPARK_SESSION.table(fully_qualified_table_name)
                         for col in df.columns:
                             add_to_list(col)
                     except Exception as e:
                         print(f"Warning: Could not retrieve schema for table '{fully_qualified_table_name}': {e}")
-
     
-    # Handle CTEs first by recursively processing them. This ensures columns from
-    #    'WITH' clauses are resolved before they are referenced in the main query.
+    # handle CTEs recursively to resolve columns before the main query.
     if isinstance(parsed_query, With):
         for cte_exp in parsed_query.expressions:
             for cte in cte_exp:
-                # The body of a CTE is a Select expression; we process it recursively
+                # body of a CTE is a Select expression; process it recursively
                 cte_columns = get_all_columns_from_sql(cte.this.sql())
                 for col in cte_columns:
                     add_to_list(col)
-        # Set the main query to the body of the WITH statement
+        # set main query to the body of the WITH statement
         main_query_ast = parsed_query.args['this']
     else:
         main_query_ast = parsed_query
 
-    # Process the main query's SELECT list to get final output columns.
+    # process the main query's SELECT list for output columns.
     final_select_exp = main_query_ast.find(Select)
     if final_select_exp:
         for expr in final_select_exp.expressions:
+            # handle the '*' based on the configuration flag
             if isinstance(expr, Star):
-                # If a '*' is found in the final SELECT, resolve it.
-                resolve_stars(final_select_exp)
+                if not Config.DATA_INTEGRITY_REF_COLS_ONLY:
+                    # If flag is False, expand the wildcard
+                    resolve_stars(final_select_exp)
             else:
-                # For explicit columns, add their alias or name.
+                # for explicit columns, add their alias or name.
                 add_to_list(expr.alias_or_name)
 
-    # Find and add all other explicit column references from clauses like
-    #    `WHERE`, `JOIN` conditions, `GROUP BY`, etc. This captures columns
-    #    that are used but not part of the final SELECT list.
+    # find and add all other explicit column references from clauses like
+    # `WHERE`, `JOIN` conditions, `GROUP BY`, etc.
     for column_exp in main_query_ast.find_all(sqlglot.expressions.Column):
-        add_to_list(column_exp.name)
+        if column_exp.name != '*':
+            add_to_list(column_exp.name)
 
     return all_columns
 
