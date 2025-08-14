@@ -97,7 +97,11 @@ class Config:
 	'SQL Error Query': "object",
 	'Level': "object",
 	'Message': "object"
-    }	    
+    }
+
+    # If True, only return error records for explicitly referenced columns in data integrity SQL
+    # The most unique (primary) key is also included for row reference.
+    DATA_INTRGTY_EXPL_COLS_ONLY = False
 
     # Data dictionary schema primary key field
     DATA_DICT_PRIMARY_KEY = "field_name"
@@ -216,8 +220,7 @@ class Config:
         r'^\s+$'
     ]
 
-    DATA_INTEGRITY_REF_COLS_ONLY = True
-
+    DATA_INTRGTY_EXPL_COLS_ONLY = False
 
     class jsonEncoder(json.JSONEncoder):
         """Custom JSON encoder class that handles serialization of NumPy data types
@@ -3371,7 +3374,7 @@ def get_all_columns_from_sql(sql_statement):
         for expr in final_select_exp.expressions:
             # handle the '*' based on the configuration flag
             if isinstance(expr, Star):
-                if not Config.DATA_INTEGRITY_REF_COLS_ONLY:
+                if not Config.DATA_INTRGTY_EXPL_COLS_ONLY:
                     # If flag is False, expand the wildcard
                     resolve_stars(final_select_exp)
             else:
