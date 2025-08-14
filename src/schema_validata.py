@@ -2617,7 +2617,7 @@ def value_errors_unallowed(df, column_name, allowed_values, unique_column=None):
 
     def is_allowed(val):
         # Ignore nulls as defined by check_na_value
-        if check_na_value(val):
+        if check_na_value(val): 
             return True
         val_str = str(val).strip()
         # String match (stripped)
