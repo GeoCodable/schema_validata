@@ -2629,7 +2629,7 @@ def value_errors_unallowed(df, column_name, allowed_values, unique_column=None):
             try:
                 if type(allowed) is str:
                     continue
-                c
+                if type(allowed)(val) == allowed:
                     return True
             except Exception:
                 continue
