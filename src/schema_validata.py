@@ -2489,7 +2489,7 @@ def validate_schema(observed_schema,
         schema_violations[observed_dataset] = {'schema_violations': v_results}
 
     return schema_violations
-    
+
 #---------------------------------------------------------------------------------- 
 
 def subset_error_df(df, column_name, unique_column=None):
@@ -3338,13 +3338,15 @@ def get_all_columns_from_sql(sql_statement):
                 for table_exp in from_exp.find_all(Table):
                     # Use .name to get the base table name without aliases
                     base_table_name = table_exp.name
+                    fully_qualified_table_name = table_exp.sql(dialect="databricks")
                     try:
-                        # Query Spark's catalog for the table schema
-                        df = Config.SPARK_SESSION.table(base_table_name)
+                        # Query Spark's catalog for the table schema using the fully qualified name
+                        df = Config.SPARK_SESSION.table(fully_qualified_table_name)
                         for col in df.columns:
                             add_to_list(col)
                     except Exception as e:
-                        print(f"Warning: Could not retrieve schema for table '{base_table_name}': {e}")
+                        print(f"Warning: Could not retrieve schema for table '{fully_qualified_table_name}': {e}")
+
     
     # Handle CTEs first by recursively processing them. This ensures columns from
     #    'WITH' clauses are resolved before they are referenced in the main query.
