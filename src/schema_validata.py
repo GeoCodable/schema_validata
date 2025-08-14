@@ -3828,7 +3828,8 @@ def validate_dataset(dataset_path,
     #----------------
     schema_errors = validate_schema(observed_schema=obs_schema,
                                     data_dictionary=data_dict, 
-                                    schema_mapping=schema_mapping)
+                                    schema_mapping=schema_mapping,
+                                    dataset_path=dataset_path)
     
     # build the output metadata 
     #---------------
