@@ -220,7 +220,14 @@ class Config:
         r'^\s+$'
     ]
 
+	# Data integrity properies
+
+	# Determines if all columns (FALSE) are returned from an SQL 
+	# data integrity check when * is used or not (TRUE)
     DATA_INTRGTY_EXPL_COLS_ONLY = False
+
+	# Dictionry to hold custom variables for dynamic sql queries		
+    SQL_STATEMENT_VARS = {}
 
     class jsonEncoder(json.JSONEncoder):
         """Custom JSON encoder class that handles serialization of NumPy data types
@@ -252,7 +259,6 @@ class Config:
                 """Handle NumPy arrays by converting them to lists for JSON encoding."""
                 return self.encode(obj.tolist())  # Recursively convert to list
             return super().default(obj)
-
 #---------------------------------------------------------------------------------- 
 
 def db_path_to_local(path):
@@ -3480,6 +3486,68 @@ def convert_to_pyspark_pandas(df):
 	
 #----------------------------------------------------------------------------------
 
+def find_sql_variables_in_query(sql_statement, variables_dict=Config.SQL_STAMENT_VARS):
+    """
+    Extracts variable names from a SQL string and returns them as a dictionary with 
+    variable names as keys and their corresponding values from the provided dictionary.
+
+    Variables are expected to be in the format `${variable_name}`.
+
+    Parameters
+    ----------
+    sql_statement : str
+        The string containing the SQL query with placeholders.
+    variables_dict : dict, optional
+        A dictionary where keys are variable names and values are the values to replace 
+        in the SQL query. Default is Config.SQL_STAMENT_VARS.
+
+    Returns
+    -------
+    dict
+        A dictionary with variable names as keys and their corresponding values as strings.
+        If a variable is not found in the dictionary, a placeholder message is returned.
+    """
+    pattern = r'\${(.*?)}'
+    variable_names = re.findall(pattern, sql_statement)
+    return {var: variables_dict.get(
+        var, f'**Variable {var} is not defined in Config.SQL_STATEMENT_VARS**'
+    ) for var in variable_names}
+
+#----------------------------------------------------------------------------------
+
+def replace_sql_vars_in_string(sql_statement, variables_dict=Config.SQL_STAMENT_VARS):
+    """
+    Replaces placeholders in the query string with corresponding values from the variables dictionary.
+
+    Parameters
+    ----------
+    input_string : str
+        The query string containing placeholders in the format ${variable_name}.
+    variables_dict : dict, optional
+        A dictionary where keys are variable names and values are the values to replace in the query string.
+        Default is Config.SQL_STAMENT_VARS.
+
+    Returns
+    -------
+    str
+        The input string with placeholders replaced by their corresponding values from the variables dictionary.
+        If a placeholder does not have a corresponding value in the dictionary, it remains unchanged.
+
+    Example
+    -------
+    >>> variables = {'selected_state': 'LA', 'classification_code': 2}
+    >>> sql_statement = "The state is ${selected_state} and the code is ${classification_code}."
+    >>> replace_sql_vars_in_string(sql_statement, variables)
+    'The state is LA and the code is 2.'
+    """
+    variables = find_sql_variables(sql_statement)
+
+    for vp, vv in variables.items():
+        sql_statement = sql_statement.replace(f'${{{vp}}}', str(vv))
+    return sql_statement
+
+#----------------------------------------------------------------------------------
+
 def get_rows_with_condition_spark(sql_statement, primary_table=None, error_message='Error', error_level='error'):
     """
     Executes a SQL statement in Spark and returns rows from the result, including a unique identifier column.
@@ -3500,6 +3568,8 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
     pd.DataFrame
         DataFrame with columns: Primary_table, SQL_Error_Query, Message, Level, Lookup_Column, Lookup_Value, Error_Value.
     """
+
+	sql_statement = replace_sql_vars_in_string(sql_statement)
     # remove extra spaces and hidden chars
     sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
     sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
@@ -3509,7 +3579,7 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
         # Extract the table names and set primary table name for the SQL statement
         q_tbls = extract_all_table_names(sql_statement)
 
-        if not (isinstance(primary_table, str) and bool(primary_table)):
+        if not isinstance(primary_table, str) and not bool(primary_table):
             primary_table = q_tbls[0]
         missing_tables = [t for t in q_tbls if not Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
         if missing_tables:
