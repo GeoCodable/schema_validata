@@ -3570,10 +3570,12 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
     """
 
     sql_statement = replace_sql_vars_in_string(sql_statement)
+
+	print(f'\nRunning query: \n\t\t{sql_statement}')
     # remove extra spaces and hidden chars
     sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
     sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
-
+	
     results = []
     try:
         # Extract the table names and set primary table name for the SQL statement
@@ -3771,7 +3773,6 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
         sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
         sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
 
-        print(f'\nRunning query: \n\t\t{sql_statement}')
         if conn == 'pyspark_pandas':
             # Get rows that meet the condition specified in the SQL statement
             error_rows = get_rows_with_condition_spark(
