@@ -3571,7 +3571,7 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
 
     sql_statement = replace_sql_vars_in_string(sql_statement)
 
-	print(f'\nRunning query: \n\t\t{sql_statement}')
+    print(f'\nRunning query: \n\t\t{sql_statement}')
     # remove extra spaces and hidden chars
     sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
     sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
