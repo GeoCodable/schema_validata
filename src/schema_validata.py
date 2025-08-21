@@ -3540,7 +3540,7 @@ def replace_sql_vars_in_string(sql_statement, variables_dict=Config.SQL_STATEMEN
     >>> replace_sql_vars_in_string(sql_statement, variables)
     'The state is LA and the code is 2.'
     """
-    variables = find_sql_variables(sql_statement)
+    variables = find_sql_variables_in_query(sql_statement)
 
     for vp, vv in variables.items():
         sql_statement = sql_statement.replace(f'${{{vp}}}', str(vv))
