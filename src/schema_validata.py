@@ -3486,7 +3486,7 @@ def convert_to_pyspark_pandas(df):
 	
 #----------------------------------------------------------------------------------
 
-def find_sql_variables_in_query(sql_statement, variables_dict=Config.SQL_STAMENT_VARS):
+def find_sql_variables_in_query(sql_statement, variables_dict=Config.SQL_STATEMENT_VARS):
     """
     Extracts variable names from a SQL string and returns them as a dictionary with 
     variable names as keys and their corresponding values from the provided dictionary.
@@ -3499,7 +3499,7 @@ def find_sql_variables_in_query(sql_statement, variables_dict=Config.SQL_STAMENT
         The string containing the SQL query with placeholders.
     variables_dict : dict, optional
         A dictionary where keys are variable names and values are the values to replace 
-        in the SQL query. Default is Config.SQL_STAMENT_VARS.
+        in the SQL query. Default is Config.SQL_STATEMENT_VARS.
 
     Returns
     -------
@@ -3515,7 +3515,7 @@ def find_sql_variables_in_query(sql_statement, variables_dict=Config.SQL_STAMENT
 
 #----------------------------------------------------------------------------------
 
-def replace_sql_vars_in_string(sql_statement, variables_dict=Config.SQL_STAMENT_VARS):
+def replace_sql_vars_in_string(sql_statement, variables_dict=Config.SQL_STATEMENT_VARS):
     """
     Replaces placeholders in the query string with corresponding values from the variables dictionary.
 
@@ -3525,7 +3525,7 @@ def replace_sql_vars_in_string(sql_statement, variables_dict=Config.SQL_STAMENT_
         The query string containing placeholders in the format ${variable_name}.
     variables_dict : dict, optional
         A dictionary where keys are variable names and values are the values to replace in the query string.
-        Default is Config.SQL_STAMENT_VARS.
+        Default is Config.SQL_STATEMENT_VARS.
 
     Returns
     -------
