@@ -3592,10 +3592,13 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
 
         # Execute the modified SQL statement
         spark_result = Config.SPARK_SESSION.sql(sql_statement)
+        # Force immediate execution to check for errors
+        num_rows = spark_result.count()
+        print(f"\t - Query executed successfully, found {num_rows} rows.")
         result_df = convert_to_pyspark_pandas(spark_result)
         result_df = handle_duplicate_columns(result_df)
 
-        if result_df is None or len(result_df) == 0:
+        if result_df is None or num_rows == 0:
             # Append error information if no rows are returned
             results.append({
                 "Primary_table": primary_table,
