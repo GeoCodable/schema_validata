@@ -3757,7 +3757,7 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
         sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
         sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
         sql_ref_tables.extend(extract_all_table_names(sql_statement))
-		sql_ref_tables = list(set(sql_ref_tables))
+        sql_ref_tables = list(set(sql_ref_tables))
 
     # Load CSV files into an in-memory if needed
     conn, tables = load_files_to_sql(files, include_tables=sql_ref_tables)
