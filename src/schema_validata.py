@@ -3144,8 +3144,8 @@ def load_files_to_sql(files, include_tables=[]):
             
             for tn, df in dfs.items():
                 # Skip the table if its name is not in the include_tables list
-                if bool(include_tables) and tn not in include_tables:
-                    continue
+                # if bool(include_tables) and tn not in include_tables:
+                #     continue
                 
                 # Convert pandas DataFrame to pyspark.pandas DataFrame and create a Spark SQL table
                 if isinstance(df, pd.DataFrame):
@@ -3468,7 +3468,7 @@ def convert_to_pyspark_pandas(df):
         elif isinstance(df, pd.DataFrame):
             result_df = ps.from_pandas(df)
     except Exception as e:
-        warnings.warn(f"Using legacy conversion to pyspark.pandas due to: {e}")
+        print(f"Trying legacy conversion to pyspark.pandas due to: {e}")
         try:
             if isinstance(df,SparkDataFrame ):
                 # Fallback to a legacy method (less efficient for large data)
@@ -3477,12 +3477,12 @@ def convert_to_pyspark_pandas(df):
                 # Fallback to a legacy method
                 result_df = ps.DataFrame(df)
         except Exception as e2:
-            warnings.warn(f"Fallback conversion to pyspark.pandas failed: {e2}")
+            print(f"Fallback conversion to pyspark.pandas failed: {e2}")
             # If all conversions fail, return an empty DataFrame
             return ps.DataFrame()
     
     # If a conversion was successful, return the result, otherwise return an empty DataFrame
-    return result_df if result_df is not None else ps.DataFrame()
+    return result_df if result_df is not None else df
 	
 #----------------------------------------------------------------------------------
 
@@ -3745,7 +3745,6 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
     # Check if 'Data_Integrity' sheet exists in the Excel file
     if sheet_name in pd.ExcelFile(data_dict_path).sheet_names:
         if Config.USE_PYSPARK:
-            # rules_df = ps.read_excel(to_dbfs_path(data_dict_path), sheet_name=sheet_name)  encountered bug with 'squeeze at 3.5.0
             pdf = pd.read_excel(to_dbfs_path(data_dict_path), sheet_name=sheet_name)
             rules_df = ps.from_pandas(pdf)
         else:
@@ -3757,7 +3756,8 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
         # remove extra spaces and hidden chars
         sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
         sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
-        sql_ref_tables.append(extract_all_table_names(sql_statement))
+        sql_ref_tables.extend(extract_all_table_names(sql_statement))
+		sql_ref_tables = list(set(sql_ref_tables))
 
     # Load CSV files into an in-memory if needed
     conn, tables = load_files_to_sql(files, include_tables=sql_ref_tables)
