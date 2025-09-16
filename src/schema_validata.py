@@ -764,6 +764,8 @@ def read_spreadsheets(file_path,
 
     # Use str.strip() to remove leading and trailing spaces from column names
     df.columns = df.columns.str.strip()
+    # Remove leading and trailing whitespace from the values inside the string/object columns
+    df = df.apply(lambda col: col.str.strip() if col.dtype == "object" else col)
 
     # Check if pyspark.pandas is available
     # if Config.USE_PYSPARK:
