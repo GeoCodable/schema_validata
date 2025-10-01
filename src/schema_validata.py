@@ -220,6 +220,13 @@ class Config:
         r'^\s+$'
     ]
 
+    # List of symbol characters to remove from string values before attempting numeric conversion.
+    # Includes common currency signs and scaling indicators (percent, per mille).
+    Config.NUMERIC_SYMBOLS = [
+        '$', '€', '£', '¥', '₹', '₽',            # Currency Signs
+        '%', '‰',                                # Scaling Indicators (Percent, Per Mille)
+    ]
+
 	# Data integrity properies
 
 	# Determines if all columns (FALSE) are returned from an SQL 
@@ -593,6 +600,7 @@ def eval_nested_string_literals(data):
     return data
 
 # ----------------------------------------------------------------------------------
+
 def remove_pd_df_newlines(df, replace_char=''):
     """
     Removes newline characters ('\n') from all string 
@@ -615,6 +623,68 @@ def remove_pd_df_newlines(df, replace_char=''):
     # if isinstance(df, ps.DataFrame):
     #     return df.replace('\n', replace_char, regex=True)
     return df.replace('\n', replace_char, regex=True)
+
+# ----------------------------------------------------------------------------------
+
+def conditional_numeric_conversion(
+    df,
+    null_values=Config.NA_VALUES,
+    symbols_to_strip=Config.NUMERIC_SYMBOLS
+):
+    """
+    Conditionally converts columns in a DataFrame to a numeric type if a majority of values convert successfully after cleaning symbols.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The DataFrame to process.
+    null_values : list, optional
+        A list of values to treat as NaN or missing. These values will be replaced with empty strings before conversion. 
+        Defaults to Config.NA_VALUES.
+    symbols_to_strip : list of str, optional
+        List of symbol characters to remove from string values before attempting numeric conversion. 
+        Defaults to ['$', '%', ',', '£', '€'].
+
+    Returns
+    -------
+    pandas.DataFrame
+        The DataFrame with columns conditionally converted to numeric types where possible.
+
+    Notes
+    -----
+    - Only columns of object (string) dtype are considered for conversion.
+    - Null values are replaced with empty strings before symbol removal.
+    - After symbol removal, empty strings are set to pd.NA.
+    - If conversion to numeric fails for a column, the original column is retained.
+    """
+    df_out = df.copy()
+
+    for col in df_out.columns:
+        if df_out[col].dtype != 'object':
+            continue
+
+        # Replace all null_values with empty string in the column
+        cleaned_series = df_out[col].replace(null_values, '', regex=False)
+
+        # Remove symbols from non-null values only
+        cleaned_series = cleaned_series.astype(str)
+        for symbol in symbols_to_strip:
+            cleaned_series = cleaned_series.str.replace(
+                symbol, '', regex=False
+            )
+
+        # Set empty strings back to pd.NA for conversion
+        cleaned_series = cleaned_series.replace('', pd.NA)
+
+        # Only attempt conversion on non-null values
+        try:
+            test_conversion = pd.to_numeric(cleaned_series)
+            df_out[col] = test_conversion
+        except Exception:
+            # If conversion fails, skip modifying the column
+            continue
+
+    return df_out
 
 # ----------------------------------------------------------------------------------
 
@@ -802,53 +872,61 @@ def detect_file_encoding(file_path):
 
 
 #----------------------------------------------------------------------------------   
-def read_spreadsheets(file_path, 
-                      sheet_name=None, 
-                      dtype=None, 
-                      rm_newlines=True,
-                      replace_char=" ", 
-                      na_values=None,
-                      parse_dates=None
-                      ):
+def read_spreadsheets(
+    file_path,
+    sheet_name=None,
+    dtype=None,
+    rm_newlines=True,
+    replace_char=" ",
+    na_values=None,
+    parse_dates=None,
+    strip_num_symbols=True
+):
     """
-    Reads and processes raw data from Excel (.xlsx, .xls) or CSV (.csv) files 
-    into a pandas DataFrame accounting for newline/return characters and datatypes. 
-    Parameters:
+    Reads and processes raw data from Excel (.xlsx, .xls) or CSV (.csv) files into a pandas DataFrame,
+    with options for cleaning, type inference, and symbol stripping.
+
+    Parameters
     ----------
-    file_path (str): 
-        The path to the data file.
-    sheet_name (str, optional): 
-        The name of the sheet to read from an Excel file 
-        (default: None, reads the first sheet).
-    dtype (dict, optional): 
-        A dictionary mapping column names to desired data types 
-        (default: None, inferred from data).
-    rm_newlines (bool, optional): 
-        If True, removes newline characters from the data 
-        (default: True).
-    replace_char (str, optional): 
-        The character to replace newline characters with 
-        (default: empty string "").
+    file_path : str
+        The path to the data file. Supports local or DBFS paths.
+    sheet_name : str or int or None, optional
+        The name or index of the sheet to read from an Excel file. If None, reads the first sheet.
+        Ignored for CSV files.
+    dtype : dict or str or None, optional
+        Data type for data or columns. E.g. {'a': np.float64, 'b': np.int32}. If None, types are inferred.
+    rm_newlines : bool, optional
+        If True, removes newline and carriage return characters from all string cells. Default is True.
+    replace_char : str, optional
+        The character to replace newline and carriage return characters with. Default is a single space.
     na_values : scalar, str, list-like, or dict, optional
-        Additional strings to recognize as NA/NaN. If dict passed, specific
-        per-column NA values.  By default the following values are interpreted as
-        NaN: '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan',
-        '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'n/a',
-        'nan', 'null'.
+        Additional strings to recognize as NA/NaN. If dict passed, specific per-column NA values.
+        By default, pandas recognizes: '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN',
+        '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'n/a', 'nan', 'null'.
+    parse_dates : bool or list of str or list of int or dict or None, optional
+        Specify columns to parse as dates. See pandas.read_csv/read_excel for details.
+    strip_num_symbols : bool, optional
+        If True, attempts to strip common numeric symbols (e.g., $, %, ,) and convert columns to numeric
+        where possible. Default is True.
 
-    Returns:
+    Returns
     -------
-    pandas.DataFrame or pyspark.pandas.DataFrame: 
-        The DataFrame containing the data from the file.
+    pandas.DataFrame
+        The DataFrame containing the data from the file, with optional cleaning and type conversion applied.
 
-    Raises:
-    -------
-    ValueError: 
+    Raises
+    ------
+    ValueError
         If the file extension is not supported (.xlsx, .xls, or .csv).
-    """
-    if not na_values:
-        na_values = Config.NA_VALUES
 
+    Notes
+    -----
+    - Supports both Excel and CSV files.
+    - Optionally cleans newlines and strips numeric symbols for better type inference.
+    - Column names are stripped of leading/trailing whitespace.
+    - Uses optimal encoding detection for CSV files.
+    """
+    print(filename)
     filename = os.path.basename(file_path)
     base_name, ext = os.path.splitext(filename)
     
@@ -874,7 +952,8 @@ def read_spreadsheets(file_path,
    
     if rm_newlines:
         df = remove_pd_df_newlines(df, replace_char=replace_char)
-
+    if strip_num_symbols:
+        df = conditional_numeric_conversion(df, null_values=na_values)
     # Use str.strip() to remove leading and trailing spaces from column names
     df.columns = df.columns.str.strip()
 
