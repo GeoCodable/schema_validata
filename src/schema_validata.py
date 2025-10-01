@@ -926,7 +926,7 @@ def read_spreadsheets(
     - Column names are stripped of leading/trailing whitespace.
     - Uses optimal encoding detection for CSV files.
     """
-    print(filename)
+
     filename = os.path.basename(file_path)
     base_name, ext = os.path.splitext(filename)
     
