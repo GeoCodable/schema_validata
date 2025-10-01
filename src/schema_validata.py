@@ -222,7 +222,7 @@ class Config:
 
     # List of symbol characters to remove from string values before attempting numeric conversion.
     # Includes common currency signs and scaling indicators (percent, per mille).
-    Config.NUMERIC_SYMBOLS = [
+    NUMERIC_SYMBOLS = [
         '$', '€', '£', '¥', '₹', '₽',            # Currency Signs
         '%', '‰',                                # Scaling Indicators (Percent, Per Mille)
     ]
