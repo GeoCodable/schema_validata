@@ -1492,8 +1492,8 @@ def read_df_with_optimal_dtypes(
         parse_dates=parse_dates
     )
 
-	if strip_num_symbols:
-		df = conditional_numeric_conversion(df, null_values=read_as_na)	
+    if strip_num_symbols:
+        df = conditional_numeric_conversion(df, null_values=read_as_na)	
 		
     # Final pass: attempt datetime inference for columns still typed as string.
     with warnings.catch_warnings():
