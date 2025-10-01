@@ -225,6 +225,7 @@ class Config:
     NUMERIC_SYMBOLS = [
         '$', '€', '£', '¥', '₹', '₽',            # Currency Signs
         '%', '‰',                                # Scaling Indicators (Percent, Per Mille)
+		',' 									 # Thousands separator
     ]
 
 	# Data integrity properies
