@@ -881,7 +881,7 @@ def read_spreadsheets(
     replace_char=" ",
     na_values=None,
     parse_dates=None,
-    strip_num_symbols=True
+    strip_num_symbols=False
 ):
     """
     Reads and processes raw data from Excel (.xlsx, .xls) or CSV (.csv) files into a pandas DataFrame,
@@ -1492,6 +1492,9 @@ def read_df_with_optimal_dtypes(
         parse_dates=parse_dates
     )
 
+	if strip_num_symbols:
+		df = conditional_numeric_conversion(df, null_values=read_as_na)	
+		
     # Final pass: attempt datetime inference for columns still typed as string.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
