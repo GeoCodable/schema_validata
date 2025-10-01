@@ -1360,7 +1360,8 @@ def read_df_with_optimal_dtypes(
     rm_newlines=True,
     replace_char='',
     na_values=None,
-    na_patterns=None
+    na_patterns=None,
+	strip_num_symbols=True
 ):
     """
     Infers optimal data types for a DataFrame read, preserving
@@ -1383,6 +1384,9 @@ def read_df_with_optimal_dtypes(
     na_patterns : list or None, optional
         List of regex patterns identifying strings representing missing values.
         If None, uses Config.NA_PATTERNS.
+    strip_num_symbols : bool, optional
+        If True, attempts to strip common numeric symbols (e.g., $, %, ,) and convert columns to numeric
+        where possible. Default is True.
 
     Returns
     -------
