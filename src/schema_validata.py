@@ -1315,11 +1315,17 @@ def get_non_null_values(series):
     pandas.Series
         A Series with non-null and non-empty values.
     """
+    _s = series.copy()
 
-    non_null_values = series.replace(Config.NA_VALUES, pd.NA).dropna()
-    non_null_values = series.replace(r'^\s+$', pd.NA, regex=True).dropna()
+    # Remove NA values (excluding pd.NA/np.nan for replace)
+    na_replace = [v for v in Config.NA_VALUES if not pd.isna(v)]
+    _s = _s.replace(na_replace, pd.NA)
 
-    return non_null_values
+    # Replace whitespace-only strings with pd.NA
+    _s = _s.replace(r'^\s+$', pd.NA, regex=True)
+
+    # Drop NA values
+    return _s.dropna()
 #---------------------------------------------------------------------------------- 
 
 def read_spreadsheet_with_params(file_path, 
