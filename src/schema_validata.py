@@ -957,6 +957,8 @@ def read_spreadsheets(
         df = conditional_numeric_conversion(df, null_values=na_values)
     # Use str.strip() to remove leading and trailing spaces from column names
     df.columns = df.columns.str.strip()
+    # Remove leading and trailing whitespace from the values inside the string/object columns
+    df = df.apply(lambda col: col.str.strip() if col.dtype == "object" else col)
 
     return df
 
