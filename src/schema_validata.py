@@ -133,40 +133,49 @@ class Config:
 
     # Common US & ISO timestamp formats
     COMMON_TIMESTAMPS = [
-                        # Common US Formats - Time 
-                        "%I:%M:%S %p", # 12-Hour Time to seconds with AM/PM (Very Common)
-                        "%I:%M:%S%p",  # 12-Hour Time to seconds with AM/PM (Common)
-                        "%I:%M %p",    # 12-Hour Time to mins with AM/PM (Very Common)
-                        "%I:%M%p",     # 12-Hour Time to mins with AM/PM (Common)
-                        # Common International and ISO Standard Date Formats (ISO 8601)
-                        "%H:%M:%S",    # 24-Hour Time (24-hour clock, US Military, Technical)
-                        "%H:%M:%S %p"  # 24-Hour Time with AM/PM
+	    "%H:%M:%S",        # 24-Hour Time (most common technical)
+	    "%I:%M:%S %p",     # 12-Hour Time to seconds with AM/PM
+	    "%I:%M:%S%p",      # 12-Hour Time to seconds with AM/PM (no space)
+	    "%I:%M %p",        # 12-Hour Time to mins with AM/PM
+	    "%I:%M%p",         # 12-Hour Time to mins with AM/PM (no space)
+	    "%H:%M",           # 24-Hour Time, no seconds
+	    "%I %p",           # 12-Hour, hour only with AM/PM
+	    "%H",              # 24-Hour, hour only
     ]
-
-    # Common US & ISO date/datetime formats
+	
+    # Common US & ISO date/datetime formats (ordered by specificity and likelihood)
     COMMON_DATETIMES = [
-       
-                        # US Formats - Date
-
-                        "%m/%d/%Y",    # Month/Day/Year (Most Common)
-                        "%d/%m/%Y",    # Day/Month/Year (Common)
-                        "%b-%d-%Y",    # Month Abbreviation-Day-Year (e.g., Jan-01-2024)
-                        "%B %d, %Y",   # Month Name-Day, Year (e.g., January 01, 2024)
-                        "%Y-%m-%d",    # Year-Month-Day (ISO 8601 & Increasingly Common in US)
-                        "%d-%m-%Y",    # Day-Month-Year (Less Common)
-
-                        # US Date Time Formats 
-                        "%m/%d/%Y %H:%M:%S", # Date and Time with Separators (Common)
-                        "%Y-%m-%d %H:%M:%S", # Date and Time with Separators (Less Common)
-                        "%d-%m-%Y %H:%M:%S", # Date and Time with Separators (Uncommon)
-
-                        # ISO Standard Date Formats (ISO 8601)
-                        #"%Y-%m-%d", # Year-Month-Day (Standard, Consistent) used above
-                        "%Y-%m",   # Year-Month (Less Common)
-
-                        # ISO Standard Date Time Formats (ISO 8601)
-                        "%Y-%m-%dT%H:%M:%SZ", # Combined Date and Time with Zulu Time (Specific Use Cases)
-                        "%Y-%m-%dT%H:%M:%S%z", # Combined Date and Time with Offset (Rare)
+	    # 1. ISO & HIGH-PRECISION DATETIMES (Specific matches first)
+	    "%Y-%m-%dT%H:%M:%S%z",   # ISO with Offset: 2026-01-06T15:00:00+0000
+	    "%Y-%m-%dT%H:%M:%SZ",    # ISO Zulu: 2026-01-06T15:00:00Z
+	    "%Y-%m-%d %H:%M:%S.%f",  # ISO with Microseconds
+	    "%Y-%m-%d %H:%M:%S",     # ISO Standard: 2026-01-06 15:00:00
+	
+	    # 2. US DATETIMES (4-Digit Year)
+	    "%m/%d/%Y %H:%M:%S",     # US: 01/06/2026 15:00:00
+	    "%d/%m/%Y %H:%M:%S",     # EU: 06/01/2026 15:00:00
+	    "%B %d, %Y %H:%M:%S",    # Full Month: January 06, 2026 15:00:00
+	
+	    # 3. 4-DIGIT YEAR DATES (No Time)
+	    "%Y-%m-%d",              # ISO Date: 2026-01-06
+	    "%m/%d/%Y",              # US Date: 01/06/2026
+	    "%d/%m/%Y",              # EU Date: 06/01/2026
+	    "%b-%d-%Y",              # Abbr Month: Jan-06-2026
+	    "%B %d, %Y",             # Full Month: January 06, 2026
+	    "%d-%m-%Y",              # Day-Month-Year: 06-01-2026
+	
+	    # 4. 2-DIGIT YEAR DATETIMES (Check time before date)
+	    "%m/%d/%y %H:%M:%S",     # US: 01/06/26 15:00:00
+	    "%d/%m/%y %H:%M:%S",     # EU: 06/01/26 15:00:00
+	
+	    # 5. 2-DIGIT YEAR DATES (Least specific - checked last)
+	    "%m/%d/%y",              # US: 01/06/26
+	    "%d/%m/%y",              # EU: 06/01/26
+	    "%y-%m-%d",              # Short ISO: 26-01-06
+	    
+	    # 6. PARTIAL DATES
+	    "%Y-%m",                 # Year-Month: 2026-01
+	    "%B %Y",                 # Month Year: January 2026
     ]
 
     # Common null/missing value representations
