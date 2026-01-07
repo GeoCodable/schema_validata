@@ -843,7 +843,10 @@ def infer_datetime_column(df, column_name):
             if is_likely_datetime_col(column_name):
                 def try_dateutil_parser(x):
                     try:
-                        return dt_parser.parse(x)
+                        # return dt_parser.parse(x)
+                        # yearfirst=False: interpret ambiguous dates like '01/02/2020' as month/day/year (default US style)
+                        # dayfirst=False: do not prioritize day over month in ambiguous dates; month comes first
+                        return dt_parser.parse(x, yearfirst=False, dayfirst=False)
                     except (ValueError, TypeError):
                         return None
                 converted_series = non_null_values.apply(try_dateutil_parser)
