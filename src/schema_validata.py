@@ -145,38 +145,56 @@ class Config:
 	
     # Common US & ISO date/datetime formats (ordered by specificity and likelihood)
     COMMON_DATETIMES = [
-	    # 1. ISO & HIGH-PRECISION DATETIMES (Specific matches first)
+	    # ISO & HIGH-PRECISION DATETIMES
 	    "%Y-%m-%dT%H:%M:%S%z",   # ISO with Offset: 2026-01-06T15:00:00+0000
 	    "%Y-%m-%dT%H:%M:%SZ",    # ISO Zulu: 2026-01-06T15:00:00Z
 	    "%Y-%m-%d %H:%M:%S.%f",  # ISO with Microseconds
 	    "%Y-%m-%d %H:%M:%S",     # ISO Standard: 2026-01-06 15:00:00
 	
-	    # 2. US DATETIMES (4-Digit Year)
-	    "%m/%d/%Y %H:%M:%S",     # US: 01/06/2026 15:00:00
-	    "%d/%m/%Y %H:%M:%S",     # EU: 06/01/2026 15:00:00
-	    "%B %d, %Y %H:%M:%S",    # Full Month: January 06, 2026 15:00:00
+	    # 4-DIGIT YEAR DATETIMES (US & EU)
+	    "%m/%d/%Y %H:%M:%S",     # 01/06/2026 15:00:00
+	    "%-m/%-d/%Y %H:%M:%S",   # 1/6/2026 15:00:00
+	    "%d/%m/%Y %H:%M:%S",     # 06/01/2026 15:00:00
+	    "%-d/%-m/%Y %H:%M:%S",   # 6/1/2026 15:00:00
+	    "%B %d, %Y %H:%M:%S",    # January 06, 2026 15:00:00
 	
-	    # 3. 4-DIGIT YEAR DATES (No Time)
-	    "%Y-%m-%d",              # ISO Date: 2026-01-06
-	    "%m/%d/%Y",              # US Date: 01/06/2026
-	    "%d/%m/%Y",              # EU Date: 06/01/2026
-	    "%b-%d-%Y",              # Abbr Month: Jan-06-2026
-	    "%B %d, %Y",             # Full Month: January 06, 2026
-	    "%d-%m-%Y",              # Day-Month-Year: 06-01-2026
+	    # 2-DIGIT YEAR DATETIMES (US & EU)
+	    "%m/%d/%y %H:%M:%S",     # 01/06/26 15:00:00
+	    "%-m/%-d/%y %H:%M:%S",   # 1/6/26 15:00:00
+	    "%d/%m/%y %H:%M:%S",     # 06/01/26 15:00:00
+	    "%-d/%-m/%y %H:%M:%S",   # 6/1/26 15:00:00
 	
-	    # 4. 2-DIGIT YEAR DATETIMES (Check time before date)
-	    "%m/%d/%y %H:%M:%S",     # US: 01/06/26 15:00:00
-	    "%d/%m/%y %H:%M:%S",     # EU: 06/01/26 15:00:00
+	    # 4-DIGIT YEAR DATES (No Time)
+	    "%Y-%m-%d",              # 2026-01-06 (Standard ISO)
+	    "%m/%d/%Y",              # 01/06/2026
+	    "%-m/%-d/%Y",            # 1/6/2026
+	    "%-m/%d/%Y",             # 1/06/2026
+	    "%m/%-d/%Y",             # 01/6/2026
+	    "%d/%m/%Y",              # 06/01/2026
+	    "%-d/%-m/%Y",            # 6/1/2026
+	    "%-d/%m/%Y",             # 6/01/2026
+	    "%d/%-m/%Y",             # 06/1/2026
+	    "%b-%d-%Y",              # Jan-06-2026
+	    "%B %d, %Y",             # January 06, 2026
+	    "%d-%m-%Y",              # 06-01-2026
 	
-	    # 5. 2-DIGIT YEAR DATES (Least specific - checked last)
-	    "%m/%d/%y",              # US: 01/06/26
-	    "%d/%m/%y",              # EU: 06/01/26
-	    "%y-%m-%d",              # Short ISO: 26-01-06
-	    
-	    # 6. PARTIAL DATES
-	    "%Y-%m",                 # Year-Month: 2026-01
-	    "%B %Y",                 # Month Year: January 2026
-    ]
+	    # 2-DIGIT YEAR DATES (No Time)
+	    "%m/%d/%y",              # 01/06/26
+	    "%-m/%-d/%y",            # 1/6/26
+	    "%-m/%d/%y",             # 1/06/26
+	    "%m/%-d/%y",             # 01/6/26
+	    "%d/%m/%y",              # 06/01/26
+	    "%-d/%-m/%y",            # 6/1/26
+	    "%-d/%m/%y",             # 6/01/26
+	    "%d/%-m/%y",             # 06/1/26
+	    "%y-%m-%d",              # 26-01-06
+	
+	    # PARTIAL DATES
+	    "%Y-%m",                 # 2026-01
+	    "%-m/%Y",                # 1/2026
+	    "%B %Y",                 # January 2026
+	    "%b %Y",                 # Jan 2026
+	]
 
     # Common null/missing value representations
     COMMON_NA_VALUES = [
