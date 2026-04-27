@@ -12,27 +12,26 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     classifiers=[
-        'programming language :: python :: 3',
-        'programming language :: python :: 3.11',
-        'license :: osi approved :: mit license',
-        'operating system :: os independent',
-        'topic :: scientific/engineering :: information analysis',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.11',
+        'License :: OSI Approved :: MIT License',
+        'Operating System :: OS Independent',
+        'Topic :: Scientific/Engineering :: Information Analysis',
     ],
-    # align with databricks runtime 15.1+ (python 3.11)
     python_requires='>=3.11',
     py_modules=['schema_validata'],
     package_dir={'': 'src'},
     packages=setuptools.find_packages(where='src'),
     install_requires=[
-        # core dependencies aligned with dbr 15.1 system defaults
-        # constraints prevent redundant overhead and ensure runtime compatibility
-        'numpy>=1.25.2,<2.0.0',
-        'pandas>=2.1.4',
-        'pyspark>=3.5.0',
-        'openpyxl>=3.1.0',
-        'sqlglot',
-        'sql_metadata',
-        'sqllineage',
+        # Avoid forcing upgrades/downgrades for cluster pre-installed packages
+        'numpy>=1.21.0,<2.0.0',      # Databricks 15.1+ ships numpy 1.21+
+        'pandas>=2.1.4',             # Databricks 15.1+ ships pandas 2.1+
+        'pyspark>=3.5.0',            # Databricks 15.1+ ships pyspark 3.5+
+        'openpyxl>=3.1.0',           # Databricks 15.1+ ships openpyxl 3.1+
+        'sqlglot',                   # Not pre-installed, safe to require
+        'sql_metadata',              # Not pre-installed, safe to require
+        'sqllineage',                # Not pre-installed, safe to require
+        'pybind11>=2.12',            # Not pre-installed, safe to require
     ],
     include_package_data=True,
     zip_safe=False,
