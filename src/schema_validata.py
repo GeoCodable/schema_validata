@@ -16,7 +16,7 @@ try:
     import pyspark
     import pyspark.pandas as ps             # Library for data manipulation and analysis with Spark
     import pyspark.sql.functions as F
-    from pyspark.sql.types import IntegerType, FloatType, StringType, DateType, TimestampType, BooleanType
+    from pyspark.sql.types import *
     from pyspark.sql.dataframe import DataFrame as SparkDataFrame  # Alias for Spark DataFrame class/type
     from pyspark.sql import SparkSession
     pyspark_available = True
