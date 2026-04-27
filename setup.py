@@ -1,43 +1,39 @@
-
 import setuptools
 
-with open('README.md', 'r') as fh:
+# Load long description from local documentation
+with open('readme.md', 'r', encoding='utf-8') as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name='schema_validata',                 # name of the package
-    version='0.0.5',                        # release version
-    author='ahamptonTIA',                   # org/author
-    description=\
-        '''
-        databricks_helper
-
-        The schema_validata package is a collection of functions
-        to check datasets for data complinace based on a given an xlsx
-        data dictionary (see template).   
-         
-        ''',
-    long_description=long_description,      # long description read from the the readme file
+    name='schema_validata',
+    version='0.0.5',
+    author='ahamptonTIA',
+    description='data compliance validation utility for xlsx-defined schemas',
+    long_description=long_description,
     long_description_content_type='text/markdown',
-    classifiers=[                           # information to filter the project on PyPi website
-                        'Programming Language :: Python :: 3',
-                        'License :: OSI Approved :: MIT License',
-                        'Operating System :: OS Independent',
-                        'Natural Language :: English',
-                        'Programming Language :: Python :: 3.7',
-                        ],                                      
-    python_requires='>=3.7',                # minimum version requirement of the package
-    py_modules=['schema_validata'],         # name of the python package     
-    package_dir={'':'src'},                 # directory of the source code of the package
-    packages=setuptools.find_packages(where="src"), # list of all python modules to be installed
+    classifiers=[
+        'programming language :: python :: 3',
+        'programming language :: python :: 3.11',
+        'license :: osi approved :: mit license',
+        'operating system :: os independent',
+        'topic :: scientific/engineering :: information analysis',
+    ],
+    # align with databricks runtime 15.1+ (python 3.11)
+    python_requires='>=3.11',
+    py_modules=['schema_validata'],
+    package_dir={'': 'src'},
+    packages=setuptools.find_packages(where='src'),
     install_requires=[
-        # 'pyspark>=3.4.1',
-        # 'pandas>=1.4.4',
-        # 'numpy>=1.21',  
-        'openpyxl',
-        # 'sqlparse',
+        # core dependencies aligned with dbr 15.1 system defaults
+        # constraints prevent redundant overhead and ensure runtime compatibility
+        'numpy>=1.25.2,<2.0.0',
+        'pandas>=2.1.4',
+        'pyspark>=3.5.0',
+        'openpyxl>=3.1.0',
         'sqlglot',
         'sql_metadata',
-        'sqllineage'
-    ]
-    )
+        'sqllineage',
+    ],
+    include_package_data=True,
+    zip_safe=False,
+)
