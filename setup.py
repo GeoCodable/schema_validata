@@ -1,37 +1,57 @@
 import setuptools
+from pathlib import Path
 
-# Load long description from local documentation
-with open('readme.md', 'r', encoding='utf-8') as fh:
-    long_description = fh.read()
+# Resolve the path to the README file using the directory of setup.py.
+this_directory = Path(__file__).parent
+readme_path = this_directory / "readme.md"
+
+if readme_path.exists():
+    long_description = readme_path.read_text(encoding="utf-8")
+else:
+    # Fallback to uppercase README.md for case-sensitive environments.
+    readme_upper_path = this_directory / "README.md"
+    long_description = (
+        readme_upper_path.read_text(encoding="utf-8")
+        if readme_upper_path.exists()
+        else "Data compliance validation utility for xlsx-defined schemas"
+    )
 
 setuptools.setup(
-    name='schema_validata',
-    version='0.0.5',
-    author='ahamptonTIA',
-    description='data compliance validation utility for xlsx-defined schemas',
+    name="schema_validata",
+    version="0.0.6",
+    author="ahamptonTIA",
+    description="Data compliance validation utility for xlsx-defined schemas",
     long_description=long_description,
-    long_description_content_type='text/markdown',
+    long_description_content_type="text/markdown",
     classifiers=[
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.11',
-        'License :: OSI Approved :: MIT License',
-        'Operating System :: OS Independent',
-        'Topic :: Scientific/Engineering :: Information Analysis',
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.11",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+        "Topic :: Scientific/Engineering :: Information Analysis",
     ],
-    python_requires='>=3.11',
-    py_modules=['schema_validata'],
-    package_dir={'': 'src'},
-    packages=setuptools.find_packages(where='src'),
+    python_requires=">=3.11",
+    # Map the source directory for package discovery.
+    package_dir={"": "src"},
+    # Use 'packages' for directory structure with __init__.py.
+    # Use 'py_modules' for a single module file, not both.
+    packages=setuptools.find_packages(where="src"),
+    # py_modules=["schema_validata"],  # Uncomment and remove 'packages' above if using a single file.
     install_requires=[
-        # Avoid forcing upgrades/downgrades for cluster pre-installed packages
-        'numpy>=1.21.0,<2.0.0',      # Databricks 15.1+ ships numpy 1.21+
-        'pandas>=2.1.4',             # Databricks 15.1+ ships pandas 2.1+
-        'pyspark>=3.5.0',            # Databricks 15.1+ ships pyspark 3.5+
-        'openpyxl>=3.1.0',           # Databricks 15.1+ ships openpyxl 3.1+
-        'sqlglot',                   # Not pre-installed, safe to require
-        'sql_metadata',              # Not pre-installed, safe to require
-        'sqllineage',                # Not pre-installed, safe to require
-        'pybind11>=2.12',            # Not pre-installed, safe to require
+        # Pin numpy to <2.0.0 for ABI compatibility with Databricks Runtime.
+        "numpy>=1.21.0,<2.0.0",
+        # Pin pandas to <3.0.0 for Databricks Runtime compatibility.
+        "pandas>=2.1.4,<3.0.0",
+        # Match Databricks Runtime native Spark version.
+        "pyspark>=3.5.0",
+        # Standard dependencies for Excel and SQL processing.
+        "openpyxl>=3.1.0",
+        "sqlglot",
+        "sql_metadata",
+        "sqllineage",
+        # If compiling C++ code, use pyproject.toml for build dependencies.
+        # If runtime only, list here.
+        "pybind11>=2.12",
     ],
     include_package_data=True,
     zip_safe=False,
