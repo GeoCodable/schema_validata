@@ -42,9 +42,9 @@ setuptools.setup(
         # 'numpy>=1.21.0',     # Databricks Runtime 15.1+: numpy 1.23.5
         
         # SQL parsing libraries - version constraints ensure compatibility
-        'sqlglot>=10.0.0,           # SQL parsing with Databricks dialect
-        'sqllineage>=1.4.0,         # SQL lineage extraction (fallback parser)
-        'sql_metadata>=0.1.0,       # SQL metadata extraction utility
+        'sqlglot>=10.0.0,                   # SQL parsing with Databricks dialect
+        'sqllineage>=1.4.0,                 # SQL lineage extraction (fallback parser)
+        'sql_metadata>=1.0.0,<3.0.0',       # SQL metadata extraction utility
         
         # Excel file handling - compatible across all Databricks runtimes
         'openpyxl>=3.9.0,           # Runtime 15.1+ includes 3.9.13+
