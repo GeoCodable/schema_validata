@@ -37,8 +37,8 @@ setuptools.setup(
     install_requires=[
         # NOTE: These are provided by Databricks runtimes and are commented out
         # to prevent version conflicts. The package will NOT modify them if already installed.
-        # 'pyspark,    
-        'pandas,     
+        # 'pyspark',    
+        'pandas',     
         # 'numpy>=1.21.0',   dependancy of pandas
         
         # SQL parsing libraries - version constraints ensure compatibility
