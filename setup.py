@@ -1,7 +1,11 @@
 import setuptools
+import os
 
-with open('README.md', 'r') as fh:
-    long_description = fh.read()
+# Safe read for README.md to prevent installation-time crashes
+long_description = "schema_validata package"
+if os.path.exists('README.md'):
+    with open('README.md', 'r', encoding='utf-8') as fh:
+        long_description = fh.read()
 
 setuptools.setup(
     name='schema_validata',                 # name of the package
