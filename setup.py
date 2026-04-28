@@ -35,21 +35,24 @@ setuptools.setup(
     package_dir={'':'src'},                 # directory of the source code of the package
     packages=setuptools.find_packages(where="src"), # list of all python modules to be installed
     install_requires=[
-        # Only check that pandas exists, do not specify version to avoid conflicts with Spark environment
-        'pandas',
+        # NOTE: These are provided by Databricks runtimes and are commented out
+        # to prevent version conflicts. The package will NOT modify them if already installed.
+        # 'pyspark,    
+        'pandas,     
+        # 'numpy>=1.21.0',   dependancy of pandas
         
         # SQL parsing libraries - version constraints ensure compatibility
-        'sqlglot>=10.0.0',                   # SQL parsing with Databricks dialect
-        'sqllineage>=1.4.0',                 # SQL lineage extraction (fallback parser)
+        'sqlglot>=10.0.0',                  # SQL parsing with Databricks dialect
+        'sqllineage>=1.4.0',                # SQL lineage extraction (fallback parser)
         'sql_metadata>=1.0.0,<3.0.0',       # SQL metadata extraction utility
         
         # Excel file handling - compatible across all Databricks runtimes
-        'openpyxl>=3.9.0',           # Runtime 15.1+ includes 3.9.13+
+        'openpyxl>=3.0.0',           # Compatible with all Databricks runtimes
         
         # Character encoding detection - optional but recommended
-        'chardet',
+        'chardet>=4.0.0',            # Compatible with all Databricks runtimes
         
         # Date/time utilities
-        'python-dateutil>=2.8.2',    # Robust date parsing across Python versions
+        'python-dateutil>=2.8.0',    # Robust date parsing across Python versions
     ]
 )
