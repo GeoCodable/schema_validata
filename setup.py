@@ -4,46 +4,41 @@ with open('README.md', 'r') as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name='schema_validata',                 # name of the package
-    version='0.0.5',                        # release version
-    author='ahamptonTIA',                   # org/author
-    description=\
+    name='schema_validata',  # package name
+    version='0.0.5',  # release version
+    author='ahamptonTIA',  # author/org
+    description=
         '''
-        schema_validata
-
-        The schema_validata package is a collection of functions
-        to check datasets for data compliance based on a given xlsx
-        data dictionary (see template).   
-         
+        A comprehensive suite of validation functions to ensure dataset 
+        compliance against Excel-based data dictionaries within 
+        Databricks and Spark environments.
         ''',
-    long_description=long_description,      # long description read from the the readme file
+    long_description=long_description,  # read from README.md
     long_description_content_type='text/markdown',
-    classifiers=[                           # information to filter the project on PyPi website
-                        'Programming Language :: Python :: 3',
-                        'Programming Language :: Python :: 3.10',
-                        'Programming Language :: Python :: 3.11',
-                        'License :: OSI Approved :: MIT License',
-                        'Operating System :: OS Independent',
-                        'Natural Language :: English',
-                        ],                                      
-    python_requires='>=3.10,<4.0',          # Databricks Runtime 15.1+ supports Python 3.10+
-    py_modules=['schema_validata'],         # name of the python package     
-    package_dir={'':'src'},                 # directory of the source code of the package
-    packages=setuptools.find_packages(where="src"), # list of all python modules to be installed
-
+    classifiers=[
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'License :: OSI Approved :: MIT License',
+        'Operating System :: OS Independent',
+        'Natural Language :: English',
+    ],
+    python_requires='>=3.10',  # DBR 15.1+ uses Python 3.10 or 3.11+
+    py_modules=['schema_validata'],  # module name
+    package_dir={'': 'src'},  # source directory
+    packages=setuptools.find_packages(where="src"),  # all modules in src
     install_requires=[
-        # Core data libraries
-        # We use >= to satisfy the pre-installed DBR versions without forcing a reinstall
-        'pandas>=1.5.0',     
-        'numpy>=1.21.0',     
-        
-        # SQL parsing
-        'sqlglot>=10.0.0', 
-        'sqllineage>=1.4.0,
-        'sql_metadata>=0.1.0,
-        
-        # Utilities
-        'openpyxl>=3.9.0,
-        'chardet>=5.0.0,
-        'python-dateutil>=2.8.2,
+        # Core data libraries: loose constraints for DBR compatibility
+        'pandas>=1.5.0',
+        'numpy>=1.21.0',
+        # SQL parsing libraries: pinned to prevent breaking changes
+        'sqlglot>=10.0.0,<24.0.0',
+        'sqllineage>=1.4.0,<2.0.0',
+        'sql_metadata>=0.1.0,<1.0.0',
+        # File handling & utilities
+        'openpyxl>=3.9.0,<4.0.0',
+        'chardet>=5.0.0,<6.0.0',
+        'python-dateutil>=2.8.2,<3.0.0',
     ]
+)
