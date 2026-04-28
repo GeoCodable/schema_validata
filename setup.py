@@ -1,58 +1,54 @@
 import setuptools
-from pathlib import Path
 
-# Resolve the path to the README file using the directory of setup.py.
-this_directory = Path(__file__).parent
-readme_path = this_directory / "readme.md"
-
-if readme_path.exists():
-    long_description = readme_path.read_text(encoding="utf-8")
-else:
-    # Fallback to uppercase README.md for case-sensitive environments.
-    readme_upper_path = this_directory / "README.md"
-    long_description = (
-        readme_upper_path.read_text(encoding="utf-8")
-        if readme_upper_path.exists()
-        else "Data compliance validation utility for xlsx-defined schemas"
-    )
+with open('README.md', 'r') as fh:
+    long_description = fh.read()
 
 setuptools.setup(
-    name="schema_validata",
-    version="0.0.6",
-    author="ahamptonTIA",
-    description="Data compliance validation utility for xlsx-defined schemas",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.11",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
-        "Topic :: Scientific/Engineering :: Information Analysis",
-    ],
-    python_requires=">=3.11",
-    # Map the source directory for package discovery.
-    package_dir={"": "src"},
-    # Use 'packages' for directory structure with __init__.py.
-    # Use 'py_modules' for a single module file, not both.
-    packages=setuptools.find_packages(where="src"),
-    # py_modules=["schema_validata"],  # Uncomment and remove 'packages' above if using a single file.
+    name='schema_validata',                 # name of the package
+    version='0.0.5',                        # release version
+    author='ahamptonTIA',                   # org/author
+    description=\
+        '''
+        schema_validata
+
+        The schema_validata package is a collection of functions
+        to check datasets for data compliance based on a given xlsx
+        data dictionary (see template).   
+         
+        ''',
+    long_description=long_description,      # long description read from the the readme file
+    long_description_content_type='text/markdown',
+    classifiers=[                           # information to filter the project on PyPi website
+                        'Programming Language :: Python :: 3',
+                        'Programming Language :: Python :: 3.10',
+                        'Programming Language :: Python :: 3.11',
+                        'License :: OSI Approved :: MIT License',
+                        'Operating System :: OS Independent',
+                        'Natural Language :: English',
+                        ],                                      
+    python_requires='>=3.10,<4.0',          # Databricks Runtime 15.1+ supports Python 3.10+
+    py_modules=['schema_validata'],         # name of the python package     
+    package_dir={'':'src'},                 # directory of the source code of the package
+    packages=setuptools.find_packages(where="src"), # list of all python modules to be installed
     install_requires=[
-        # Pin numpy to <2.0.0 for ABI compatibility with Databricks Runtime.
-        "numpy>=1.21.0,<2.0.0",
-        # Pin pandas to <3.0.0 for Databricks Runtime compatibility.
-        "pandas>=2.1.4,<3.0.0",
-        # Match Databricks Runtime native Spark version.
-        "pyspark>=3.5.0",
-        # Standard dependencies for Excel and SQL processing.
-        "openpyxl>=3.1.0",
-        "sqlglot",
-        "sql_metadata",
-        "sqllineage",
-        # If compiling C++ code, use pyproject.toml for build dependencies.
-        # If runtime only, list here.
-        "pybind11>=2.12",
-    ],
-    include_package_data=True,
-    zip_safe=False,
+        # NOTE: These are provided by Databricks runtimes and are commented out
+        # to prevent version conflicts. The package will NOT modify them if already installed.
+        # 'pyspark>=3.4.1',    # Databricks Runtime 15.1+: PySpark 3.4.1
+        # 'pandas>=1.5.0',     # Databricks Runtime 15.1+: pandas 1.5.3
+        # 'numpy>=1.21.0',     # Databricks Runtime 15.1+: numpy 1.23.5
+        
+        # SQL parsing libraries - version constraints ensure compatibility
+        'sqlglot>=10.0.0,<20.0.0',          # Stable SQL parsing with Databricks dialect
+        'sqllineage>=1.4.0,<2.0.0',         # SQL lineage extraction (fallback parser)
+        'sql_metadata>=0.1.0,<1.0.0',       # SQL metadata extraction utility
+        
+        # Excel file handling - compatible across all Databricks runtimes
+        'openpyxl>=3.9.0,<4.0.0',           # Runtime 15.1+ includes 3.9.13+
+        
+        # Character encoding detection - optional but recommended
+        'chardet>=5.0.0,<6.0.0',            # Character encoding detection for CSV files
+        
+        # Date/time utilities
+        'python-dateutil>=2.8.2,<3.0.0',    # Robust date parsing across Python versions
+    ]
 )
