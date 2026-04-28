@@ -44,10 +44,10 @@ setuptools.setup(
         # to prevent version conflicts. The package will NOT modify them if already installed.
         # 'pyspark',    
         # 'pandas',    
-        'numpy>=1.21.0,<2.2.0',       # Keep numpy from jumping to 2.4.4
-        'packaging>=23.2.0,<25.0.0',  # Keep packaging from jumping to 26.2
-        'Pygments>=2.15.0,<2.20.0',   # Keep the notebook UI stable
-        'platformdirs<4.4.0',         # Prevent updates beyond 4.4
+        # 'numpy>=1.21.0,<2.2.0',       # Keep numpy from jumping to 2.4.4
+        # 'packaging>=23.2.0,<25.0.0',  # Keep packaging from jumping to 26.2
+        # 'Pygments>=2.15.0,<2.20.0',   # Keep the notebook UI stable
+        # 'platformdirs<4.4.0',         # Prevent updates beyond 4.4
         
         # SQL parsing libraries - version constraints ensure compatibility
         'sqlglot>=10.0.0',                  # SQL parsing with Databricks dialect
