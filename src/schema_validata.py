@@ -577,19 +577,30 @@ def get_best_uid_column(df, preferred_column=None):
     int_candidates = []
     string_candidates = []
     float_candidates = []
-    
+    date_time_columns = []
+
     total_len = len(df)
 
     for col in df.columns:
         dtype = str(df[col].dtype)
         is_unique = df[col].nunique() == total_len
 
+        # Identify date/time columns and deprioritize them
+        if "date" in dtype.lower() or "time" in dtype.lower():
+            if is_unique:
+                date_time_columns.append(col)
+            continue
+
         if dtype in ['string', 'object']:
             non_null_values = df[col].dropna()
-            # Check for UUID-like strings (36-character length)
-            if not non_null_values.empty and (non_null_values.str.len() == 36).all():
-                if is_unique:
-                    uuid_candidates.append(col)
+            # Only check .str if all values are string type
+            if not non_null_values.empty and non_null_values.map(lambda x: isinstance(x, str)).all():
+                # Check for UUID-like strings (36-character length)
+                if (non_null_values.map(lambda x: len(x) == 36)).all():
+                    if is_unique:
+                        uuid_candidates.append(col)
+                elif is_unique:
+                    string_candidates.append(col)
             elif is_unique:
                 string_candidates.append(col)
 
@@ -609,10 +620,16 @@ def get_best_uid_column(df, preferred_column=None):
                 return preferred_column
             return candidates[0]
 
+    # Deprioritize date/time columns, but use if nothing else is unique
+    if date_time_columns:
+        if preferred_column and preferred_column in date_time_columns:
+            return preferred_column
+        return date_time_columns[0]
+
     # Second Pass: If no fully unique column exists, find the most unique one
     if preferred_column and preferred_column in df.columns:
         return preferred_column
-    
+
     return df.nunique().idxmax()
 	
 # ----------------------------------------------------------------------------------
@@ -3894,7 +3911,8 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
         SQL data integrity rules.
     files : list of str
         List of paths to CSV files to be loaded into an in-memory SQLite database.
-
+    sheet_name : str, optional
+        The name of the sheet containing the data integrity rules. Default is 'Data_Integrity'.
     Returns
     -------
     pd.DataFrame
@@ -3909,18 +3927,32 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
     if not sheet_name:
         sheet_name = 'Data_Integrity'
     # Check if 'Data_Integrity' sheet exists in the Excel file
-    if sheet_name in pd.ExcelFile(data_dict_path).sheet_names:
-        if Config.USE_PYSPARK:
-            pdf = pd.read_excel(to_dbfs_path(data_dict_path), sheet_name=sheet_name)
-            rules_df = ps.from_pandas(pdf)
-        else:
-            rules_df = pd.read_excel(data_dict_path, sheet_name=sheet_name)
+    try:
+        excel_sheets = pd.ExcelFile(data_dict_path).sheet_names
+    except Exception:
+        print(f"Warning: Could not open '{data_dict_path}'.")
+        return errors_df
+    if sheet_name not in excel_sheets:
+        print(f"Warning: Sheet '{sheet_name}' not found in '{data_dict_path}'.")
+        return errors_df
+    if Config.USE_PYSPARK:
+        pdf = pd.read_excel(to_dbfs_path(data_dict_path), sheet_name=sheet_name)
+        rules_df = ps.from_pandas(pdf)
+    else:
+        rules_df = pd.read_excel(data_dict_path, sheet_name=sheet_name)
+
+    # If the sheet is empty (no rows or only headers), return empty error df
+    if rules_df is None or len(rules_df) == 0 or rules_df.dropna(how='all').empty:
+        print(f"Warning: No data integrity rules found in sheet '{sheet_name}' of '{data_dict_path}'.")
+        return errors_df
 
     # Extract table references from each SQL rule
     for index, row in rules_df.iterrows():
-        sql_statement = row['SQL Error Query']
+        sql_statement = row.get('SQL Error Query', None)
+        if sql_statement is None or (isinstance(sql_statement, float) and pd.isna(sql_statement)):
+            continue
         # remove extra spaces and hidden chars
-        sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
+        sql_statement = re.sub(r'\s+', ' ', str(sql_statement).strip())
         sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
         sql_ref_tables.extend(extract_all_table_names(sql_statement))
         sql_ref_tables = list(set(sql_ref_tables))
@@ -3930,13 +3962,16 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
 
     # Iterate over each rule in the rules DataFrame
     for index, row in rules_df.iterrows():
-        primary_table = str(row['Primary Table'])
-        sql_statement = row['SQL Error Query']
-        error_level = str(row['Level'])
-        error_message = str(row['Message'])
+        primary_table = str(row.get('Primary Table', ''))
+        sql_statement = row.get('SQL Error Query', None)
+        error_level = str(row.get('Level', ''))
+        error_message = str(row.get('Message', ''))
+
+        if sql_statement is None or (isinstance(sql_statement, float) and pd.isna(sql_statement)):
+            continue
 
         # remove extra spaces and hidden chars
-        sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
+        sql_statement = re.sub(r'\s+', ' ', str(sql_statement).strip())
         sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
 
         if conn == 'pyspark_pandas':
@@ -3947,12 +3982,12 @@ def find_errors_with_sql(data_dict_path, files, sheet_name=None):
                 error_message=error_message, 
                 error_level=error_level
             )
+        else:
+            error_rows = pd.DataFrame()
 
         # If there are any error rows, concatenate them to the errors DataFrame
         if not error_rows.empty:
             errors_df = pd.concat([errors_df, error_rows], ignore_index=True)
-
-    return errors_df
 
 #---------------------------------------------------------------------------------- 
 
@@ -4259,3 +4294,169 @@ def schema_validation_to_xlsx(validation_results,
 
 #----------------------------------------------------------------------------------
 
+def report_and_strip_whitespaces(
+    file_path,
+    overwrite=False,
+    sheet_name=None,
+    rm_newlines=True,
+    replace_char=""
+):
+    """
+    Reads and processes raw data from excel or csv files into a pandas dataframe.
+    identifies and reports leading/trailing whitespace issues per column, then strips whitespace from all string values, including newline/return characters.
+    removes rows consisting only of na, whitespace, or zeros.
+    use sv.Config.NA_VALUES to set additional na value types.
+
+    parameters
+    ----------
+    file_path : str
+        path to the data file.
+    overwrite : bool, optional
+        if true, overwrite the original file with cleaned data (default: false).
+    sheet_name : str, optional
+        name of the sheet to read from an excel file (default: none, reads the first sheet).
+    rm_newlines : bool, optional
+        if true, removes newline characters from the data (default: true).
+    replace_char : str, optional
+        character to replace newline characters with (default: "").
+
+    returns
+    -------
+    pandas.DataFrame
+        dataframe with whitespace stripped from string columns.
+
+    assumptions
+    -----------
+    expects a valid file path and sheet name if excel. only processes one sheet at a time.
+
+    limitations
+    -----------
+    does not handle files with multiple sheets unless specified. only strips whitespace and newlines, does not handle other data cleaning.
+    """
+    # load file and announce check
+    print(f"\n-Checking for leading and trailing whitespaces in file: {file_path}" + (f", sheet: {sheet_name}" if sheet_name else ""))
+    df = sv.read_spreadsheets(file_path, dtype="object")
+
+    # remove rows where all values are null, whitespace, or zeros
+    def is_null_or_whitespace_or_zero(x):
+        if pd.isna(x):
+            return True
+        x_str = str(x)
+        x_str = x_str.replace('\u200b', '').replace('\u200c', '').replace('\u200d', '').replace('\ufeff', '')
+        if x_str.strip() == '':
+            return True
+        if x_str.strip('0').strip() == '' and x_str.strip() != '':
+            return True
+        return False
+
+    null_rows_mask = df.apply(lambda row: all(is_null_or_whitespace_or_zero(x) for x in row), axis=1)
+    if null_rows_mask.any():
+        print(f"\t- Removing {null_rows_mask.sum()} rows that are completely null, whitespace, or zeros.")
+    df = df[~null_rows_mask].reset_index(drop=True)
+
+    # clean column names by removing leading/trailing spaces
+    colname_whitespace_mask = [col for col in df.columns if col != col.strip()]
+    if colname_whitespace_mask:
+        print(f"\t- The following column names have leading/trailing spaces:")
+        for col in colname_whitespace_mask:
+            print(f"\t\t-'{col}'")
+        new_columns = [col.strip() for col in df.columns]
+        df.columns = new_columns
+        print(f"\t- Leading/trailing spaces removed from column names.")
+
+    # clean cell values by stripping leading/trailing spaces
+    changed_vals = False
+    for col in df.columns:
+        col_series = df[col].dropna().astype(str)
+        whitespace_mask = col_series != col_series.str.strip()
+        if whitespace_mask.any():
+            problem_vals = col_series[whitespace_mask].unique()
+            print(f"\t- Column '{col}' has {len(problem_vals)} values with leading/trailing spaces:")
+            for val in problem_vals:
+                print(f"\t\t-'{val}'")
+            df[col] = df[col].apply(lambda x: x.strip() if isinstance(x, str) else x)
+            changed_vals = True
+
+    # save temp file if changes made
+    if changed_vals:
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".csv").name
+        df.to_csv(temp_file, index=False)
+    else:
+        print(f"\t- No leading/trailing spaces removed.")
+        temp_file = file_path
+
+    # remove newlines if requested
+    df_no_newlines = sv.read_df_with_optimal_dtypes(temp_file, rm_newlines=False)
+    df_out = sv.read_df_with_optimal_dtypes(temp_file, rm_newlines=rm_newlines, replace_char=replace_char)
+
+    if not df_out.equals(df_no_newlines):
+        changed_vals = True
+        df = df_out
+        print(f"\t- Found line returns to remove")
+        changed_count = (df.astype(str) != df_no_newlines.astype(str)).sum().sum()
+        print(f"\t\t- Number of values changed by whitespace/newline removal: {changed_count}")
+    else:
+        print(f"\t- No line returns found to remove")
+
+    # overwrite file if changes required
+    if (changed_vals or colname_whitespace_mask) and overwrite:
+        if file_path.lower().endswith((".xlsx", ".xls")) and sheet_name is not None:
+            print(f"\t- Overwriting sheet '{sheet_name}' in Excel file: {file_path}")
+            with pd.ExcelWriter(file_path, mode="a", if_sheet_exists="replace", engine="openpyxl") as writer:
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        elif file_path.lower().endswith(".csv"):
+            print(f"\t- Overwriting CSV file: {file_path}")
+            df.to_csv(file_path, index=False)
+        elif file_path.lower().endswith((".xlsx", ".xls")):
+            print(f"\t- Overwriting Excel file: {file_path}")
+            df.to_excel(file_path, index=False)
+    else:
+        print(f"\t- No changes requried")
+        
+    return df
+
+#----------------------------------------------------------------------------------
+
+def clean_csv_column_names(csv_path, overwrite=False):
+    """
+    Loads a csv file and cleans column names by lowercasing and removing special characters.
+    removes characters not allowed in typical database column names (e.g., %, spaces, punctuation).
+    allowed: a-z, 0-9, and underscore (_).
+
+    parameters
+    ----------
+    csv_path: path to the csv file.
+    overwrite: if true, overwrite the csv file with cleaned column names.
+
+    returns
+    -------
+    pd.DataFrame: dataframe with column names lowercased and special characters removed.
+
+    assumptions
+    -----------
+    expects a valid csv file path.
+
+    limitations
+    -----------
+    only cleans column names, does not clean cell values.
+    """
+    # load csv file
+    df = pd.read_csv(csv_path)
+    original_columns = df.columns.tolist()
+
+    # clean column names by lowercasing and removing special characters
+    df.columns = [
+        re.sub(r'[^a-z0-9_]', '', col.lower().replace(' ', '_'))
+        for col in df.columns
+    ]
+    if df.columns.tolist() != original_columns:
+        print(f"\t- Column names changed:")
+        for orig, new in zip(original_columns, df.columns):
+            if orig != new:
+                print(f"\t\t- '{orig}' -> '{new}'")
+    # overwrite csv if requested
+    if overwrite:
+        df.to_csv(csv_path, index=False)
+    return df
+
+#----------------------------------------------------------------------------------
