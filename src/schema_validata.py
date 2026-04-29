@@ -13,35 +13,58 @@ from dateutil import parser as dt_parser    # Library for parsing dates from str
 import pandas as pd                         # Library for data manipulation and analysis
 import numpy as np                          # Library for numerical operations
 
-# --- PySpark Imports with Executor Guard ---
+# --- PROTECTED PYSPARK IMPORTS ---
+# initialize these as None/False first so the rest of the 
+# package doesn't crash if Spark isn't found.
+pyspark_available = False
+ps = None
+SparkDataFrame = None
+SparkSession = None
+
 try:
     import pyspark
-    import pyspark.sql.functions as F
-    from pyspark.sql.types import *
-    from pyspark.sql.dataframe import DataFrame as SparkDataFrame  # Alias for Spark DataFrame
-    from pyspark.sql import SparkSession
+    from pyspark import SparkContext
     
-    # GUARD: Check if we are on a worker node (Executor)
-    # Executors have 'SPARK_EXECUTOR_ID' set. The Driver does not.
+    # Check if we are on the Driver and if the JVM bridge is active
+    # This prevents the 'JVM wasn't initialised' error on Executors
     if os.environ.get("SPARK_EXECUTOR_ID") is None:
-        import pyspark.pandas as ps         # Safe to import here (Driver has JVM)
+        try:
+            # Attempt to access the gateway; if this fails, we are in a non-JVM context
+            if SparkContext._gateway is not None:
+                import pyspark.pandas as ps
+                import pyspark.sql.functions as F
+                from pyspark.sql.types import *
+                from pyspark.sql.dataframe import DataFrame as SparkDataFrame
+                from pyspark.sql import SparkSession
+                pyspark_available = True
+        except (AttributeError, Exception):
+            # Fallback for environments where Spark is installed but not started
+            pyspark_available = False
     else:
-        ps = None                           # Skip import on executors to prevent JVM crash
-        
-    pyspark_available = True
+        # We are on an Executor: 
+        # We can safely import basic SQL functions, but NOT pyspark.pandas (ps)
+        import pyspark.sql.functions as F
+        from pyspark.sql.types import *
+        pyspark_available = True
+        ps = None 
 
 except ImportError:
-    print("PySpark is not available in the session.")
     pyspark_available = False
-    ps = None
-# -------------------------------------------
+# ---------------------------------
 
 from sqlite3 import connect                 # Standard library for creating and managing SQLite3 databases
 import sqlparse                             # Library for parsing SQL queries
 import sql_metadata                         # Library for advanced parsing of SQL queries
-from sqllineage.runner import LineageRunner # More robust libary for itentifying sql parts
+from sqllineage.runner import LineageRunner # More robust library for identifying sql parts
 import sqlglot                              # Most robust library for parsing and analyzing SQL queries
 from sqlglot.expressions import Star, Select, Table, With
+
+# --- Warnings & Options ---
+try:
+    # Ignore future warning on silent downcasting (requires pandas >= 2.2.0)
+    pd.set_option('future.no_silent_downcasting', True)
+except Exception:
+    pass
 #---------------------------------------------------------------------------------- 
 
 # List of warnings to silence
