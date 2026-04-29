@@ -1594,17 +1594,17 @@ def read_df_with_optimal_dtypes(
 		
     # Final pass: attempt datetime inference for columns still typed as string.
     with warnings.catch_warnings():
-		warnings.simplefilter("ignore", RuntimeWarning)
-		try:
-			for col in df.columns:
-				# skip if we already know it's all-null
-				if dtypes.get(col) == "Null-Unknown":
-					continue
-				if pd.api.types.is_string_dtype(df[col]):
-					df[col] = infer_datetime_column(df, col)
-		except Exception:
-			# If any error occurs, leave the column as is.
-			pass
+        warnings.simplefilter("ignore", RuntimeWarning)
+        try:
+            for col in df.columns:
+                # skip if we already know it's all-null
+                if dtypes.get(col) == "Null-Unknown":
+                    continue
+                if pd.api.types.is_string_dtype(df[col]):
+                    df[col] = infer_datetime_column(df, col)
+        except Exception:
+            # If any error occurs, leave the column as is.
+            pass
 
     return df
 #---------------------------------------------------------------------------------- 
