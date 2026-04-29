@@ -4305,7 +4305,7 @@ def report_and_strip_whitespaces(
     Reads and processes raw data from excel or csv files into a pandas dataframe.
     identifies and reports leading/trailing whitespace issues per column, then strips whitespace from all string values, including newline/return characters.
     removes rows consisting only of na, whitespace, or zeros.
-    use sv.Config.NA_VALUES to set additional na value types.
+    use Config.NA_VALUES to set additional na value types.
 
     parameters
     ----------
@@ -4335,7 +4335,7 @@ def report_and_strip_whitespaces(
     """
     # load file and announce check
     print(f"\n-Checking for leading and trailing whitespaces in file: {file_path}" + (f", sheet: {sheet_name}" if sheet_name else ""))
-    df = sv.read_spreadsheets(file_path, dtype="object")
+    df = read_spreadsheets(file_path, dtype="object")
 
     # remove rows where all values are null, whitespace, or zeros
     def is_null_or_whitespace_or_zero(x):
@@ -4386,8 +4386,8 @@ def report_and_strip_whitespaces(
         temp_file = file_path
 
     # remove newlines if requested
-    df_no_newlines = sv.read_df_with_optimal_dtypes(temp_file, rm_newlines=False)
-    df_out = sv.read_df_with_optimal_dtypes(temp_file, rm_newlines=rm_newlines, replace_char=replace_char)
+    df_no_newlines = read_df_with_optimal_dtypes(temp_file, rm_newlines=False)
+    df_out = read_df_with_optimal_dtypes(temp_file, rm_newlines=rm_newlines, replace_char=replace_char)
 
     if not df_out.equals(df_no_newlines):
         changed_vals = True
