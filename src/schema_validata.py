@@ -12,18 +12,30 @@ from datetime import datetime               # Standard library for working with 
 from dateutil import parser as dt_parser    # Library for parsing dates from strings
 import pandas as pd                         # Library for data manipulation and analysis
 import numpy as np                          # Library for numerical operations
+
+# --- PySpark Imports with Executor Guard ---
 try:
     import pyspark
-    import pyspark.pandas as ps             # Library for data manipulation and analysis with Spark
     import pyspark.sql.functions as F
-    from pyspark.sql.types import IntegerType, FloatType, StringType, DateType, TimestampType, BooleanType
-    from pyspark.sql.dataframe import DataFrame as SparkDataFrame  # Alias for Spark DataFrame class/type
+    from pyspark.sql.types import *
+    from pyspark.sql.dataframe import DataFrame as SparkDataFrame  # Alias for Spark DataFrame
     from pyspark.sql import SparkSession
+    
+    # GUARD: Check if we are on a worker node (Executor)
+    # Executors have 'SPARK_EXECUTOR_ID' set. The Driver does not.
+    if os.environ.get("SPARK_EXECUTOR_ID") is None:
+        import pyspark.pandas as ps         # Safe to import here (Driver has JVM)
+    else:
+        ps = None                           # Skip import on executors to prevent JVM crash
+        
     pyspark_available = True
 
 except ImportError:
-    print("pyspark.pandas is not available in the session.")
+    print("PySpark is not available in the session.")
     pyspark_available = False
+    ps = None
+# -------------------------------------------
+
 from sqlite3 import connect                 # Standard library for creating and managing SQLite3 databases
 import sqlparse                             # Library for parsing SQL queries
 import sql_metadata                         # Library for advanced parsing of SQL queries
@@ -38,19 +50,22 @@ warnings_to_ignore = [
     {"message": "^Columns.*"},
     {"category": FutureWarning}
 ]
-
+#---------------------------------------------------------------------------------- 
 # Suppress the warnings
 for warning in warnings_to_ignore:
     if "category" in warning:
         warnings.filterwarnings("ignore", category=warning["category"])
     elif "message" in warning:
         warnings.filterwarnings("ignore", message=warning["message"])
+
 try:
     # Ignore future warning on silent down casting (code assumes new method)
+    # This requires pandas >= 2.2.0
     pd.set_option('future.no_silent_downcasting', True)
-except:
+except Exception:
+    # Catching 'Exception' instead of bare 'except:' is safer. 
+    # It gracefully ignores the error on older pandas versions that don't have this option.
     pass
-    
 #---------------------------------------------------------------------------------- 
 
 # Config class
