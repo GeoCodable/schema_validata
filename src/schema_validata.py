@@ -13,7 +13,7 @@ from dateutil import parser as dt_parser    # Library for parsing dates from str
 import pandas as pd                         # Library for data manipulation and analysis
 import numpy as np                          # Library for numerical operations
 
-# --- PROTECTED PYSPARK IMPORTS ---
+
 # initialize these as None/False first so the rest of the 
 # package doesn't crash if Spark isn't found.
 pyspark_available = False
@@ -1592,16 +1592,19 @@ def read_df_with_optimal_dtypes(
     if strip_num_symbols:
         df = conditional_numeric_conversion(df, null_values=read_as_na)	
 		
-    # Final pass: attempt datetime inference for columns still typed as string.
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        try:
-            for col in df.columns:
-                if pd.api.types.is_string_dtype(df[col]):
-                    df[col] = infer_datetime_column(df, col)
-        except Exception:
-            # If any error occurs, leave the column as is.
-            pass
+	# Final pass: attempt datetime inference for columns still typed as string.
+	with warnings.catch_warnings():
+	    warnings.simplefilter("ignore", RuntimeWarning)
+	    try:
+	        for col in df.columns:
+	            # ← DEEPER FIX: Skip if we already know it's all-null
+	            if dtypes.get(col) == "Null-Unknown":
+	                continue
+	            if pd.api.types.is_string_dtype(df[col]):
+	                df[col] = infer_datetime_column(df, col)
+	    except Exception:
+	        # If any error occurs, leave the column as is.
+	        pass
 
     return df
 #---------------------------------------------------------------------------------- 
