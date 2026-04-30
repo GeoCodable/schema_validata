@@ -109,14 +109,14 @@ class Config:
         print(config.NA_VALUES)  # Accessing a configuration attribute
     """
 
-	USE_PYSPARK = True
+    USE_PYSPARK = True
     SPARK_SESSION = SparkSession.builder.appName("schema_validata").getOrCreate()
     # if pyspark_available:
     #     USE_PYSPARK = True
     #     SPARK_SESSION = SparkSession.builder.appName("schema_validata").getOrCreate()
     # else:
     # 	USE_PYSPARK = False
-
+	
     # Data dictionary schema
     DATA_DICT_SCHEMA = {
         "field_name": "object",
