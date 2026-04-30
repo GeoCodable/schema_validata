@@ -724,10 +724,10 @@ def conditional_numeric_conversion(
         The DataFrame to process.
     null_values : list, optional
         Values to treat as missing. These are replaced with empty strings
-        before conversion. Defaults to sv.Config.NA_VALUES.
+        before conversion. Defaults to Config.NA_VALUES.
     symbols_to_strip : list of str, optional
         Symbols to remove from string values before numeric conversion.
-        Defaults to sv.Config.NUMERIC_SYMBOLS.
+        Defaults to Config.NUMERIC_SYMBOLS.
 
     Returns
     -------
@@ -744,9 +744,9 @@ def conditional_numeric_conversion(
     """
     # set default values from config if not provided
     if null_values is None:
-        null_values = sv.Config.NA_VALUES
+        null_values = Config.NA_VALUES
     if symbols_to_strip is None:
-        symbols_to_strip = sv.Config.NUMERIC_SYMBOLS
+        symbols_to_strip = Config.NUMERIC_SYMBOLS
 
     df_out = df.copy()
 
