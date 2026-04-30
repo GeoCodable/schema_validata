@@ -835,9 +835,6 @@ def infer_datetime_column(df, column_name):
     """
     Attempts to convert a DataFrame column to datetime type when appropriate.
 
-    For numeric columns (potential Excel serial dates), conversion is only attempted if the column name is suggestive of a date or time field.
-    For string columns, strict formats defined by Config are always tested; flexible parsing via dateutil is only used if the column name is suggestive.
-
     Parameters
     ----------
     df : pandas.DataFrame or pyspark.pandas.DataFrame
@@ -849,20 +846,31 @@ def infer_datetime_column(df, column_name):
     -------
     pandas.Series or pyspark.pandas.Series
         Converted column (dtype datetime64) if inference was successful; otherwise, the original column.
+
+    Notes
+    -----
+    For numeric columns (potential Excel serial dates), conversion is only attempted if the column name is suggestive of a date or time field.
+    For string columns, strict formats defined by config are always tested; flexible parsing via dateutil is only used if the column name is suggestive.
+    Expects column names to be descriptive for date/time inference. Only attempts conversion if column name is suggestive or strict formats match.
+    Does not handle ambiguous date formats or columns with mixed types. Flexible parsing is limited to suggestive column names.
     """
+    # check if input is a pyspark.pandas DataFrame
     is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
+    # use pandas Series for processing
     series_for_processing = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
     orig_series = series_for_processing.copy()
 
-    # Return immediately if the column is already of a datetime type
+    # return if already datetime type
     if pd.api.types.is_datetime64_any_dtype(series_for_processing):
         return df[column_name] if is_spark_pandas else orig_series
 
-    # Handle numeric columns (Excel serial dates) only if the column name is suggestive of a date/time attribute
+    # handle numeric columns (Excel serial dates) if column name is suggestive
     if pd.api.types.is_numeric_dtype(series_for_processing):
         if is_likely_datetime_col(column_name):
             non_null_count = series_for_processing.dropna().count()
             if non_null_count > 0:
+                # Excel dates are days since 1899-12-30. 
+                # 100,000 represents Oct 14, 2173. Numbers larger than this are likely IDs/Phone numbers, not dates.
                 is_plausible_date = (series_for_processing > 1).all() and (series_for_processing < 100000).all()
                 if is_plausible_date:
                     try:
@@ -871,19 +879,19 @@ def infer_datetime_column(df, column_name):
                             origin='1899-12-30', unit='D', errors='coerce'
                         )
                         successfully_converted_count = converted_series.dropna().count()
+                        # only return if conversion is successful for most values
                         if successfully_converted_count / non_null_count >= 0.98:
                             return ps.Series(converted_series) if is_spark_pandas else converted_series
                     except Exception:
                         pass
-        # If the column name is not suggestive or conversion fails, return the original column
         return df[column_name] if is_spark_pandas else orig_series
 
-    # For string columns, always attempt conversion using strict formats; use flexible parsing only if the column name is suggestive
+    # handle string columns
     elif pd.api.types.is_string_dtype(series_for_processing):
         non_null_values = series_for_processing.dropna()
         non_null_count = non_null_values.count()
         if non_null_count > 0:
-            # Attempt conversion using predefined strict date formats
+            # try strict date formats from config
             for fmt in getattr(Config, "COMMON_DATES", []) + getattr(Config, "COMMON_DATETIMES", []):
                 try:
                     converted_series = pd.to_datetime(non_null_values, format=fmt, errors='raise')
@@ -894,27 +902,32 @@ def infer_datetime_column(df, column_name):
                         return ps.Series(combined_series) if is_spark_pandas else combined_series
                 except (ValueError, TypeError):
                     continue
-            # If strict format conversion fails, apply flexible parsing only for suggestive column names
+
+            # use flexible parsing for suggestive column names
             if is_likely_datetime_col(column_name):
                 def try_dateutil_parser(x):
                     try:
-                        # return dt_parser.parse(x)
-                        # yearfirst=False: interpret ambiguous dates like '01/02/2020' as month/day/year (default US style)
-                        # dayfirst=False: do not prioritize day over month in ambiguous dates; month comes first
-                        return dt_parser.parse(x, yearfirst=False, dayfirst=False)
+                        dt = dt_parser.parse(x, yearfirst=False, dayfirst=False)
+                        # remove timezone awareness to match the naive 'datetime64[ns]' dtype used below
+                        if dt is not None and getattr(dt, 'tzinfo', None) is not None:
+                            dt = dt.replace(tzinfo=None)
+                        return dt
                     except (ValueError, TypeError):
-                        return None
+                        # return NaT instead of None to prevent TypeError in Pandas 2.x assignment
+                        return pd.NaT
+
                 converted_series = non_null_values.apply(try_dateutil_parser)
                 combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
                 combined_series.loc[converted_series.index] = converted_series
                 successfully_converted_count = combined_series.dropna().count()
                 if successfully_converted_count / non_null_count >= 0.98:
                     return ps.Series(combined_series) if is_spark_pandas else combined_series
-        # If conversion is not successful, return the original column
+
         return df[column_name] if is_spark_pandas else orig_series
 
-    # For all other column types, return the original column
+    # return original column if no conversion was attempted or successful
     return df[column_name] if is_spark_pandas else orig_series
+
 # ----------------------------------------------------------------------------------
 
 def detect_file_encoding(file_path):
@@ -966,7 +979,7 @@ def read_spreadsheets(
     replace_char=" ",
     na_values=None,
     parse_dates=None,
-    strip_num_symbols=False
+    strip_num_symbols=True
 ):
     """
     Reads and processes raw data from Excel (.xlsx, .xls) or CSV (.csv) files into a pandas DataFrame,
@@ -1694,62 +1707,111 @@ def infer_data_types(series):
 			
 #---------------------------------------------------------------------------------- 
 
-def check_na_value(value, na_values=Config.NA_VALUES, na_patterns=Config.NA_PATTERNS):
-	"""
-	Checks if a value is considered a missing value.
+def check_na_value(value, na_values=None, na_patterns=None):
+    """
+    Determines if a value should be considered missing, null, or pseudo-null.
 
-	The function uses predefined patterns and custom values to determine
-	if a given value should be treated as null.
+    Parameters
+    ----------
+    value : Any
+        The value to check for null or pseudo-null status.
+    na_values : list, optional
+        List of values considered null. Defaults to Config.NA_VALUES.
+    na_patterns : list, optional
+        List of regex patterns considered null. Defaults to Config.NA_PATTERNS.
 
-	Parameters
-	----------
-	value : Any
-		The value to be checked.
-	na_values : list, optional
-		A list of values to consider as nulls in addition to standard
-		nulls (e.g., `None`, `NaN`). Defaults to `Config.NA_VALUES`.
-	na_patterns : list, optional
-		A list of regular expressions to identify strings that represent
-		missing values. Defaults to `Config.NA_PATTERNS`.
+    Returns
+    -------
+    bool
+        True if the value is null, empty, or matches a pseudo-null definition; False otherwise.
 
-	Returns
-	-------
-	bool
-		True if the value is a missing/null value, False otherwise.
+    Notes
+    -----
+    - Handles invisible Unicode and control characters for robust null detection.
+    - Assumes Config.NA_VALUES and Config.NA_PATTERNS are defined externally.
+    - For string values, checks both direct matches and regex patterns.
+    - For non-string values, checks direct match in na_values.
+    """
+    # use defaults from Config if not provided
+    if na_values is None:
+        na_values = Config.NA_VALUES
+    if na_patterns is None:
+        na_patterns = Config.NA_PATTERNS
 
-	"""
-	# Check for standard null values (e.g., np.nan, None).
-	if pd.isna(value) or value is None:
-		return True
+    # check for standard null values (NaN, None, NaT)
+    if pd.isna(value):
+        return True
 
-	# If the value is a string, check patterns and values.
-	elif isinstance(value, str):
-		# If na_patterns are defined, check for a regex match.
-		if na_patterns:
-			# The patterns are compiled with IGNORECASE for case-
-			# insensitive matching.
-			compiled_patterns = [re.compile(p, re.IGNORECASE) for p in na_patterns]
-			if any(p.search(value) for p in compiled_patterns):
-				return True
+    if isinstance(value, str):
+        # remove invisible Unicode characters and control characters
+        chars_to_remove = r'[\u200b-\u200f\ufeff\u00a0\u0000-\u001f]'
+        clean_val = re.sub(chars_to_remove, '', value)
 
-		# If na_values are defined, check for a direct match.
-		if na_values:
-			# Check for an empty string after stripping whitespace.
-			if not value.strip():
-				return True
-			
-			# Create a list of lowercase na_values. The list
-			# comprehension safely handles non-string elements.
-			lowercase_na_values = [v.lower() for v in na_values if isinstance(v, str)]
-			if value.lower() in lowercase_na_values:
-				return True
+        # check for empty string after removing invisible characters and whitespace
+        if not clean_val.strip():
+            return True
 
-	# For non-string values, check for a direct match in na_values.
-	elif na_values and value in na_values:
-		return True
+        # check regex patterns against cleaned string
+        if na_patterns:
+            for p in na_patterns:
+                if re.search(p, clean_val, re.IGNORECASE):
+                    return True
 
-	return False
+        # check direct matches against cleaned string (case-insensitive)
+        if na_values:
+            lower_clean = clean_val.lower()
+            if any(lower_clean == str(v).lower() for v in na_values):
+                return True
 
+    # for non-string values, check for direct match in na_values
+    elif na_values and value in na_values:
+        return True
+
+    return False
+
+#---------------------------------------------------------------------------------- 
+
+def drop_empty_unnamed_columns(df, na_values=None, na_patterns=None):
+    """
+    Removes columns matching the 'Unnamed' pattern if all values are null or pseudo-null.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame to clean.
+    na_values : list, optional
+        Values considered empty. Defaults to Config.NA_VALUES.
+    na_patterns : list, optional
+        Regex patterns considered empty. Defaults to Config.NA_PATTERNS.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with empty unnamed columns removed.
+
+    Notes
+    -----
+    - Only columns matching the 'Unnamed' pattern are considered for removal.
+    - Uses check_na_value for robust null/empty detection.
+    - Assumes Config.NA_VALUES and Config.NA_PATTERNS are defined externally.
+    """
+    # compile regex for 'Unnamed' columns (e.g., 'Unnamed: 1', 'Unnamed_2')
+    pattern = re.compile(r'^unnamed[:_]\s?\d+$', re.IGNORECASE)
+    unnamed_cols = [col for col in df.columns if pattern.match(str(col))]
+
+    # identify which 'Unnamed' columns are empty using check_na_value for each cell
+    cols_to_drop = [
+        col for col in unnamed_cols
+        if df[col].apply(lambda x: check_na_value(x, na_values, na_patterns)).all()
+    ]
+
+    if cols_to_drop:
+        print(f"\t-Removed columns: {cols_to_drop}")
+        print(f"\t\t-Reason: All values matched null/Config NA and name matched 'Unnamed' pattern")
+
+    # drop the identified columns and return the cleaned DataFrame
+    return df.drop(columns=cols_to_drop)
+	
 #---------------------------------------------------------------------------------- 
 
 def series_hasNull(series, 
@@ -4305,95 +4367,100 @@ def report_and_strip_whitespaces(
     replace_char=""
 ):
     """
-    Reads and processes raw data from excel or csv files into a pandas dataframe.
-    identifies and reports leading/trailing whitespace issues per column, then strips whitespace from all string values, including newline/return characters.
-    removes rows consisting only of na, whitespace, or zeros.
-    use Config.NA_VALUES to set additional na value types.
+    Cleans spreadsheet or CSV data by removing whitespace, empty unnamed columns, and optionally newlines.
 
-    parameters
+    Parameters
     ----------
     file_path : str
-        path to the data file.
+        Path to the data file.
     overwrite : bool, optional
-        if true, overwrite the original file with cleaned data (default: false).
+        If True, overwrite the original file with cleaned data. Default is False.
     sheet_name : str, optional
-        name of the sheet to read from an excel file (default: none, reads the first sheet).
+        Sheet name for Excel files. Default is None.
     rm_newlines : bool, optional
-        if true, removes newline characters from the data (default: true).
+        If True, removes newline characters from cell values. Default is True.
     replace_char : str, optional
-        character to replace newline characters with (default: "").
+        Character to replace newline characters. Default is "".
 
-    returns
+    Returns
     -------
     pandas.DataFrame
-        dataframe with whitespace stripped from string columns.
+        DataFrame with whitespace and empty columns removed.
 
-    assumptions
-    -----------
-    expects a valid file path and sheet name if excel. only processes one sheet at a time.
-
-    limitations
-    -----------
-    does not handle files with multiple sheets unless specified. only strips whitespace and newlines, does not handle other data cleaning.
+    Notes
+    -----
+    - Drops empty unnamed columns before other cleaning.
+    - Removes rows that are entirely null or pseudo-null.
+    - Strips whitespace from column names and cell values.
+    - Handles newlines and preserves structural changes.
+    - Assumes read_spreadsheets and read_df_with_optimal_dtypes are available.
+    - Assumes Config.NA_VALUES and Config.NA_PATTERNS are defined externally.
     """
     # load file and announce check
     print(f"\n-Checking for leading and trailing whitespaces in file: {file_path}" + (f", sheet: {sheet_name}" if sheet_name else ""))
     df = read_spreadsheets(file_path, dtype="object")
 
-    # remove rows where all values are null, whitespace, or zeros
-    def is_null_or_whitespace_or_zero(x):
-        if pd.isna(x):
-            return True
-        x_str = str(x)
-        x_str = x_str.replace('\u200b', '').replace('\u200c', '').replace('\u200d', '').replace('\ufeff', '')
-        if x_str.strip() == '':
-            return True
-        if x_str.strip('0').strip() == '' and x_str.strip() != '':
-            return True
-        return False
+    # flag to track if any structural or content change occurred
+    data_modified = False
 
-    null_rows_mask = df.apply(lambda row: all(is_null_or_whitespace_or_zero(x) for x in row), axis=1)
+    # drop empty unnamed columns early
+    cols_before = len(df.columns)
+    df = drop_empty_unnamed_columns(df)
+    if len(df.columns) < cols_before:
+        data_modified = True
+
+    # remove rows that are entirely null/whitespace/pseudo-null
+    null_rows_mask = df.apply(lambda row: all(check_na_value(x) for x in row), axis=1)
     if null_rows_mask.any():
-        print(f"\t- Removing {null_rows_mask.sum()} rows that are completely null, whitespace, or zeros.")
-    df = df[~null_rows_mask].reset_index(drop=True)
+        print(f"\t- Removing {null_rows_mask.sum()} rows that are completely null or whitespace.")
+        df = df[~null_rows_mask].reset_index(drop=True)
+        data_modified = True
 
     # clean column names by removing leading/trailing spaces
-    colname_whitespace_mask = [col for col in df.columns if col != col.strip()]
+    colname_whitespace_mask = [col for col in df.columns if str(col) != str(col).strip()]
     if colname_whitespace_mask:
         print(f"\t- The following column names have leading/trailing spaces:")
         for col in colname_whitespace_mask:
             print(f"\t\t-'{col}'")
-        new_columns = [col.strip() for col in df.columns]
-        df.columns = new_columns
+        df.columns = [str(col).strip() for col in df.columns]
         print(f"\t- Leading/trailing spaces removed from column names.")
+        data_modified = True
 
     # clean cell values by stripping leading/trailing spaces
     changed_vals = False
     for col in df.columns:
-        col_series = df[col].dropna().astype(str)
-        whitespace_mask = col_series != col_series.str.strip()
-        if whitespace_mask.any():
-            problem_vals = col_series[whitespace_mask].unique()
-            print(f"\t- Column '{col}' has {len(problem_vals)} values with leading/trailing spaces:")
-            for val in problem_vals:
-                print(f"\t\t-'{val}'")
-            df[col] = df[col].apply(lambda x: x.strip() if isinstance(x, str) else x)
-            changed_vals = True
+        if df[col].dtype == 'object' or pd.api.types.is_string_dtype(df[col]):
+            col_series = df[col].dropna().astype(str)
+            whitespace_mask = col_series != col_series.str.strip()
+            
+            if whitespace_mask.any():
+                problem_vals = col_series[whitespace_mask].unique()
+                print(f"\t- Column '{col}' has {len(problem_vals)} values with leading/trailing spaces:")
+                for val in problem_vals:
+                    print(f"\t\t-'{val}'")
+                
+                # convert to object to avoid datetime64[ns] setitem errors
+                df[col] = df[col].astype(object).apply(lambda x: x.strip() if isinstance(x, str) else x)
+                changed_vals = True
+                data_modified = True
 
-    # save temp file if changes made
-    if changed_vals:
+    if not changed_vals:
+        print(f"\t- No leading/trailing spaces removed from cell values.")
+
+    # handle temp file and newlines
+    # save the temp file if any cleaning occurred
+    if data_modified:
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".csv").name
         df.to_csv(temp_file, index=False)
     else:
-        print(f"\t- No leading/trailing spaces removed.")
         temp_file = file_path
 
-    # remove newlines if requested
+    # read_df_with_optimal_dtypes will recover the correct datetime/numeric types
     df_no_newlines = read_df_with_optimal_dtypes(temp_file, rm_newlines=False)
     df_out = read_df_with_optimal_dtypes(temp_file, rm_newlines=rm_newlines, replace_char=replace_char)
 
     if not df_out.equals(df_no_newlines):
-        changed_vals = True
+        data_modified = True
         df = df_out
         print(f"\t- Found line returns to remove")
         changed_count = (df.astype(str) != df_no_newlines.astype(str)).sum().sum()
@@ -4402,7 +4469,7 @@ def report_and_strip_whitespaces(
         print(f"\t- No line returns found to remove")
 
     # overwrite file if changes required
-    if (changed_vals or colname_whitespace_mask) and overwrite:
+    if data_modified and overwrite:
         if file_path.lower().endswith((".xlsx", ".xls")) and sheet_name is not None:
             print(f"\t- Overwriting sheet '{sheet_name}' in Excel file: {file_path}")
             with pd.ExcelWriter(file_path, mode="a", if_sheet_exists="replace", engine="openpyxl") as writer:
@@ -4414,8 +4481,8 @@ def report_and_strip_whitespaces(
             print(f"\t- Overwriting Excel file: {file_path}")
             df.to_excel(file_path, index=False)
     else:
-        print(f"\t- No changes requried")
-        
+        print(f"\t- No changes required")
+
     return df
 
 #----------------------------------------------------------------------------------
