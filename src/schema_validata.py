@@ -110,7 +110,7 @@ class Config:
     """
 
     USE_PYSPARK = True
-    SPARK_SESSION = SparkSession.builder.appName("schema_validata").getOrCreate()
+    # SPARK_SESSION = SparkSession.builder.appName("schema_validata").getOrCreate()
     # if pyspark_available:
     #     USE_PYSPARK = True
     #     SPARK_SESSION = SparkSession.builder.appName("schema_validata").getOrCreate()
