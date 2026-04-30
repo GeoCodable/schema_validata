@@ -711,64 +711,73 @@ def remove_pd_df_newlines(df, replace_char=''):
 
 def conditional_numeric_conversion(
     df,
-    null_values=Config.NA_VALUES,
-    symbols_to_strip=Config.NUMERIC_SYMBOLS
+    null_values=None,
+    symbols_to_strip=None
 ):
     """
-    Conditionally converts columns in a DataFrame to a numeric type if a majority of values convert successfully after cleaning symbols.
+    Conditionally converts object-type columns in a DataFrame to numeric types
+    if most values convert successfully after cleaning.
 
     Parameters
     ----------
     df : pandas.DataFrame
         The DataFrame to process.
     null_values : list, optional
-        A list of values to treat as NaN or missing. These values will be replaced with empty strings before conversion. 
-        Defaults to Config.NA_VALUES.
+        Values to treat as missing. These are replaced with empty strings
+        before conversion. Defaults to sv.Config.NA_VALUES.
     symbols_to_strip : list of str, optional
-        List of symbol characters to remove from string values before attempting numeric conversion. 
-        Defaults to ['$', '%', ',', '£', '€'].
+        Symbols to remove from string values before numeric conversion.
+        Defaults to sv.Config.NUMERIC_SYMBOLS.
 
     Returns
     -------
     pandas.DataFrame
-        The DataFrame with columns conditionally converted to numeric types where possible.
+        DataFrame with columns conditionally converted to numeric types
+        where possible.
 
     Notes
     -----
-    - Only columns of object (string) dtype are considered for conversion.
-    - Null values are replaced with empty strings before symbol removal.
-    - After symbol removal, empty strings are set to pd.NA.
-    - If conversion to numeric fails for a column, the original column is retained.
+    Only columns of object (string) dtype are considered for conversion.
+    Null values are replaced with empty strings, symbols are stripped,
+    and empty strings are set to pd.NA. If conversion fails, the original
+    column is retained.
     """
+    # set default values from config if not provided
+    if null_values is None:
+        null_values = sv.Config.NA_VALUES
+    if symbols_to_strip is None:
+        symbols_to_strip = sv.Config.NUMERIC_SYMBOLS
+
     df_out = df.copy()
 
+    # iterate through columns and attempt numeric conversion for object dtype columns
     for col in df_out.columns:
         if df_out[col].dtype != 'object':
             continue
 
-        # Replace all null_values with empty string in the column
-        cleaned_series = df_out[col].replace(null_values, '', regex=False)
+        # replace null values with empty string
+        cleaned_series = df_out[col].replace(null_values, '')
 
-        # Remove symbols from non-null values only
+        # remove specified symbols from string values
         cleaned_series = cleaned_series.astype(str)
         for symbol in symbols_to_strip:
             cleaned_series = cleaned_series.str.replace(
                 symbol, '', regex=False
             )
 
-        # Set empty strings back to pd.NA for conversion
+        # set empty strings to pd.NA for conversion
         cleaned_series = cleaned_series.replace('', pd.NA)
 
-        # Only attempt conversion on non-null values
+        # attempt conversion to numeric type
         try:
             test_conversion = pd.to_numeric(cleaned_series)
             df_out[col] = test_conversion
         except Exception:
-            # If conversion fails, skip modifying the column
+            # retain original column if conversion fails
             continue
 
     return df_out
-
+	
 # ----------------------------------------------------------------------------------
 
 def column_is_timestamp(df, column_name, time_format):
