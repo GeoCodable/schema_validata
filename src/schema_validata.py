@@ -541,98 +541,89 @@ def downcast_ints(value):
 
 def get_best_uid_column(df, preferred_column=None):
     """
-    Identifies the column with the most unique values to serve as a primary key.
-
-    This function evaluates columns based on their data type and uniqueness to
-    select the best candidate for a unique identifier (UID). It prioritizes
-    columns that are fully unique and of an integer-like type. In case of a tie,
-    a preferred column is selected. A column name is always returned.
+    Selects the most appropriate unique identifier (UID) column from a DataFrame.
 
     Parameters
     ----------
-    df : pandas.DataFrame, pyspark.pandas.DataFrame, or pyspark.sql.DataFrame
-        The input DataFrame to be analyzed.
+    df : pandas.DataFrame or pyspark.pandas.DataFrame
+        Input DataFrame to evaluate for UID columns.
     preferred_column : str, optional
-        A column name to be chosen in the event of a tie for the most
-        unique values. The default is None.
+        Column name to prioritize if present.
 
     Returns
     -------
     str
-        The name of the column identified as the best UID.
-        If no suitable columns are found, it returns the preferred column
-        or the first column of the DataFrame as a fallback.
+        Name of the column selected as the best UID.
 
     Raises
     ------
     ValueError
-        If the input DataFrame is empty (has no columns).
-    """
-    # Handle different DataFrame types to work with pyspark.pandas API
-    df = convert_to_pyspark_pandas(df)
+        If the DataFrame has no columns to select from.
 
-    if df.columns.empty:
+    Notes
+    -----
+    prioritizes columns that are perfectly unique, integer types, or containing 'ID' in their name. 
+    if a preferred column is specified, it is considered in the ranking. 
+    returns the column name that best fits UID criteria, using a priority chain: uniqueness, type, name, preference, uniqueness count, and original position.
+    assumes that the DataFrame is convertible to pyspark.pandas for distributed environments.
+    """
+    # normalize DataFrame to pyspark.pandas for compatibility
+    df = convert_to_pyspark_pandas(df)
+    
+    if df is None or df.columns.empty:
         raise ValueError("DataFrame has no columns to select from.")
 
-    # A single pass to classify all columns into their respective tiers
-    uuid_candidates = []
-    int_candidates = []
-    string_candidates = []
-    float_candidates = []
-    date_time_columns = []
-
+    # compute total row count and unique value counts for each column
     total_len = len(df)
+    all_uniques = df.nunique()
+    
+    col_scores = []
 
-    for col in df.columns:
-        dtype = str(df[col].dtype)
-        is_unique = df[col].nunique() == total_len
+    # enumerate columns to track original position for fallback
+    for i, col in enumerate(df.columns):
+        series = df[col]
+        dtype_str = str(series.dtype).lower()
+        col_name_upper = str(col).upper()
+        
+        unique_count = all_uniques[col]
+        is_perfectly_unique = (unique_count == total_len)
+        has_id_in_name = "ID" in col_name_upper
+        
+        # assign type ranking: integers, UUID strings, other strings, floats, dates, others
+        if ("int" in dtype_str) and ("bool" not in dtype_str):
+            type_rank = 1
+        elif "string" in dtype_str or "object" in dtype_str:
+            sample = series.dropna().head(1).astype(str).values
+            type_rank = 1.5 if (len(sample) > 0 and len(sample[0]) == 36) else 2
+        elif "float" in dtype_str or "decimal" in dtype_str:
+            type_rank = 3
+        elif "date" in dtype_str or "time" in dtype_str:
+            type_rank = 4
+        else:
+            type_rank = 5
 
-        # Identify date/time columns and deprioritize them
-        if "date" in dtype.lower() or "time" in dtype.lower():
-            if is_unique:
-                date_time_columns.append(col)
-            continue
+        # build score dictionary for sorting
+        col_scores.append({
+            'name': col,
+            'is_perfect': 0 if is_perfectly_unique else 1,
+            'type_rank': type_rank,
+            'id_bonus': 0 if has_id_in_name else 1,
+            'is_preferred': 0 if col == preferred_column else 1,
+            'unique_val': -unique_count,  # negative for descending sort
+            'original_index': i           # fallback to leftmost column
+        })
 
-        if dtype in ['string', 'object']:
-            non_null_values = df[col].dropna()
-            # Only check .str if all values are string type
-            if not non_null_values.empty and non_null_values.map(lambda x: isinstance(x, str)).all():
-                # Check for UUID-like strings (36-character length)
-                if (non_null_values.map(lambda x: len(x) == 36)).all():
-                    if is_unique:
-                        uuid_candidates.append(col)
-                elif is_unique:
-                    string_candidates.append(col)
-            elif is_unique:
-                string_candidates.append(col)
+    # sort columns by priority chain: uniqueness, type, name, preference, uniqueness count, position
+    sorted_cols = sorted(col_scores, key=lambda x: (
+        x['is_perfect'],
+        x['type_rank'],
+        x['id_bonus'],
+        x['is_preferred'],
+        x['unique_val'],
+        x['original_index']
+    ))
 
-        elif dtype.startswith('int') or check_all_int(df[col]) == 'Int64':
-            if is_unique:
-                int_candidates.append(col)
-
-        elif dtype.startswith('float') or check_all_int(df[col]) == 'Float64':
-            if is_unique:
-                float_candidates.append(col)
-
-    # First Pass: Find a fully unique column based on the priority order
-    for candidates in [uuid_candidates, int_candidates, string_candidates, float_candidates]:
-        if candidates:
-            # Check for a preferred column tie-breaker within this tier
-            if preferred_column and preferred_column in candidates:
-                return preferred_column
-            return candidates[0]
-
-    # Deprioritize date/time columns, but use if nothing else is unique
-    if date_time_columns:
-        if preferred_column and preferred_column in date_time_columns:
-            return preferred_column
-        return date_time_columns[0]
-
-    # Second Pass: If no fully unique column exists, find the most unique one
-    if preferred_column and preferred_column in df.columns:
-        return preferred_column
-
-    return df.nunique().idxmax()
+    return sorted_cols[0]['name']
 	
 # ----------------------------------------------------------------------------------
 
@@ -844,44 +835,41 @@ def is_likely_datetime_col(colname):
 
 def infer_datetime_column(df, column_name):
     """
-    Attempts to convert a DataFrame column to datetime type when appropriate.
+    Infers and converts a column to datetime if possible, handling numeric, string, and existing datetime types.
 
     Parameters
     ----------
     df : pandas.DataFrame or pyspark.pandas.DataFrame
-        DataFrame containing the column to evaluate for datetime conversion.
+        Input DataFrame containing the column to convert.
     column_name : str
-        The column name to attempt conversion.
+        Name of the column to infer as datetime.
 
     Returns
     -------
     pandas.Series or pyspark.pandas.Series
-        Converted column (dtype datetime64) if inference was successful; otherwise, the original column.
+        Converted datetime series if inference is successful, otherwise the original series.
 
     Notes
     -----
-    For numeric columns (potential Excel serial dates), conversion is only attempted if the column name is suggestive of a date or time field.
-    For string columns, strict formats defined by config are always tested; flexible parsing via dateutil is only used if the column name is suggestive.
-    Expects column names to be descriptive for date/time inference. Only attempts conversion if column name is suggestive or strict formats match.
-    Does not handle ambiguous date formats or columns with mixed types. Flexible parsing is limited to suggestive column names.
+    attempts strict format parsing first, then flexible parsing for suggestive column names.
+    handles Excel serial dates for numeric columns and timezone-naive conversion for datetime columns.
     """
     # check if input is a pyspark.pandas DataFrame
     is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
-    # use pandas Series for processing
     series_for_processing = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
     orig_series = series_for_processing.copy()
 
-    # return if already datetime type
+    # standardize existing datetime types to be naive
     if pd.api.types.is_datetime64_any_dtype(series_for_processing):
-        return df[column_name] if is_spark_pandas else orig_series
+        if hasattr(series_for_processing, 'dt') and series_for_processing.dt.tz is not None:
+            series_for_processing = series_for_processing.dt.tz_localize(None)
+        return ps.Series(series_for_processing) if is_spark_pandas else series_for_processing
 
-    # handle numeric columns (Excel serial dates) if column name is suggestive
+    # handle numeric columns (Excel serial dates)
     if pd.api.types.is_numeric_dtype(series_for_processing):
         if is_likely_datetime_col(column_name):
             non_null_count = series_for_processing.dropna().count()
             if non_null_count > 0:
-                # Excel dates are days since 1899-12-30. 
-                # 100,000 represents Oct 14, 2173. Numbers larger than this are likely IDs/Phone numbers, not dates.
                 is_plausible_date = (series_for_processing > 1).all() and (series_for_processing < 100000).all()
                 if is_plausible_date:
                     try:
@@ -889,8 +877,9 @@ def infer_datetime_column(df, column_name):
                             series_for_processing,
                             origin='1899-12-30', unit='D', errors='coerce'
                         )
+                        if converted_series.dt.tz is not None:
+                            converted_series = converted_series.dt.tz_localize(None)
                         successfully_converted_count = converted_series.dropna().count()
-                        # only return if conversion is successful for most values
                         if successfully_converted_count / non_null_count >= 0.98:
                             return ps.Series(converted_series) if is_spark_pandas else converted_series
                     except Exception:
@@ -906,6 +895,8 @@ def infer_datetime_column(df, column_name):
             for fmt in getattr(Config, "COMMON_DATES", []) + getattr(Config, "COMMON_DATETIMES", []):
                 try:
                     converted_series = pd.to_datetime(non_null_values, format=fmt, errors='raise')
+                    if converted_series.dt.tz is not None:
+                        converted_series = converted_series.dt.tz_localize(None)
                     successfully_converted_count = converted_series.notnull().sum()
                     if successfully_converted_count == non_null_count:
                         combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
@@ -914,17 +905,15 @@ def infer_datetime_column(df, column_name):
                 except (ValueError, TypeError):
                     continue
 
-            # use flexible parsing for suggestive column names
+            # flexible parsing for suggestive column names
             if is_likely_datetime_col(column_name):
                 def try_dateutil_parser(x):
                     try:
-                        dt = dt_parser.parse(x, yearfirst=False, dayfirst=False)
-                        # remove timezone awareness to match the naive 'datetime64[ns]' dtype used below
+                        dt = dt_parser.parse(str(x), yearfirst=False, dayfirst=False)
                         if dt is not None and getattr(dt, 'tzinfo', None) is not None:
                             dt = dt.replace(tzinfo=None)
                         return dt
                     except (ValueError, TypeError):
-                        # return NaT instead of None to prevent TypeError in Pandas 2.x assignment
                         return pd.NaT
 
                 converted_series = non_null_values.apply(try_dateutil_parser)
@@ -932,11 +921,10 @@ def infer_datetime_column(df, column_name):
                 combined_series.loc[converted_series.index] = converted_series
                 successfully_converted_count = combined_series.dropna().count()
                 if successfully_converted_count / non_null_count >= 0.98:
+                    if combined_series.dt.tz is not None:
+                        combined_series = combined_series.dt.tz_localize(None)
                     return ps.Series(combined_series) if is_spark_pandas else combined_series
 
-        return df[column_name] if is_spark_pandas else orig_series
-
-    # return original column if no conversion was attempted or successful
     return df[column_name] if is_spark_pandas else orig_series
 
 # ----------------------------------------------------------------------------------
@@ -3688,58 +3676,50 @@ def handle_duplicate_columns(df):
 
 def convert_to_pyspark_pandas(df):
     """
-    Convert a DataFrame to a pyspark.pandas DataFrame.
-
-    This function attempts to convert the input DataFrame to a pyspark.pandas DataFrame
-    using the most efficient method available. It supports conversion from Spark DataFrame
-    and pandas DataFrame. If the input is already a pyspark.pandas DataFrame, it is returned as is.
+    Ensures Pandas DataFrames are compatible with Spark engine.
+    New: Handles timezone-aware datetimes and mixed-type object columns.
 
     Parameters
     ----------
-    df : pyspark.sql.DataFrame or pandas.DataFrame or pyspark.pandas.DataFrame or None
-        The input DataFrame to convert.
+    df : pandas.DataFrame or pyspark.pandas.DataFrame
+        Input DataFrame to sanitize and convert.
 
     Returns
     -------
-    pyspark.pandas.DataFrame
-        The converted pyspark.pandas DataFrame, or an empty pyspark.pandas DataFrame
-        if conversion fails or the input is None.
+    pyspark.pandas.DataFrame or pandas.DataFrame
+        Converted DataFrame suitable for Spark processing.
 
-    Examples
-    --------
-    >>> convert_to_pyspark_pandas(spark_df)
-    >>> convert_to_pyspark_pandas(pandas_df)
-    >>> convert_to_pyspark_pandas(None)
+    Notes
+    -----
+    strips timezones from datetime columns and converts object columns to strings.
+    falls back to pandas DataFrame if conversion fails.
     """
-    if df is None:
-        return ps.DataFrame()
-
-    if isinstance(df, ps.DataFrame):
+    import pyspark.pandas as ps
+    
+    # already a Spark-Pandas DataFrame
+    if 'pyspark.pandas' in str(type(df)):
         return df
 
-    result_df = None
-    try:
-        if isinstance(df, SparkDataFrame):
-            result_df = df.pandas_api()
-        elif isinstance(df, pd.DataFrame):
-            result_df = ps.from_pandas(df)
-    except Exception as e:
-        print(f"Trying legacy conversion to pyspark.pandas due to: {e}")
+    if isinstance(df, pd.DataFrame):
+        # strip timezones: Spark standard clusters require timezone-naive datetimes
+        dt_cols = df.select_dtypes(include=['datetime', 'datetimetz']).columns
+        for col in dt_cols:
+            if hasattr(df[col], 'dt') and df[col].dt.tz is not None:
+                df[col] = df[col].dt.tz_localize(None)
+        
+        # sanitize objects: convert UUIDs and mixed types to clean strings
+        obj_cols = df.select_dtypes(include=['object', 'string']).columns
+        for col in obj_cols:
+            df[col] = df[col].astype(str).replace(['nan', 'None'], np.nan)
+
         try:
-            if isinstance(df,SparkDataFrame ):
-                # Fallback to a legacy method (less efficient for large data)
-                result_df = ps.from_pandas(df.toPandas())
-            elif isinstance(df, pd.DataFrame):
-                # Fallback to a legacy method
-                result_df = ps.DataFrame(df)
-        except Exception as e2:
-            print(f"Fallback conversion to pyspark.pandas failed: {e2}")
-            # If all conversions fail, return an empty DataFrame
-            return ps.DataFrame()
-    
-    # If a conversion was successful, return the result, otherwise return an empty DataFrame
-    return result_df if result_df is not None else df
-	
+            return ps.from_pandas(df)
+        except Exception as e:
+            print(f"Warning: Spark conversion failed ({e}). Proceeding with standard Pandas.")
+            return df
+            
+    return df
+
 #----------------------------------------------------------------------------------
 
 def find_sql_variables_in_query(sql_statement, variables_dict=Config.SQL_STATEMENT_VARS):
