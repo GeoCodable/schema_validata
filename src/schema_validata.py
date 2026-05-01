@@ -835,95 +835,80 @@ def is_likely_datetime_col(colname):
 
 def infer_datetime_column(df, column_name):
     """
-    Infers and converts a column to datetime if possible, handling numeric, string, and existing datetime types.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame or pyspark.pandas.DataFrame
-        Input DataFrame containing the column to convert.
-    column_name : str
-        Name of the column to infer as datetime.
-
-    Returns
-    -------
-    pandas.Series or pyspark.pandas.Series
-        Converted datetime series if inference is successful, otherwise the original series.
-
-    Notes
-    -----
-    attempts strict format parsing first, then flexible parsing for suggestive column names.
-    handles Excel serial dates for numeric columns and timezone-naive conversion for datetime columns.
+    Infers and converts a column to datetime, handling numeric, string, and existing datetime types.
+    Standardized for Databricks Standard Clusters and Pandas 3.0 compatibility.
     """
-    # check if input is a pyspark.pandas DataFrame
+    # 1. Determine environment
     is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
     series_for_processing = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
     orig_series = series_for_processing.copy()
 
-    # standardize existing datetime types to be naive
+    # 2. Handle existing datetime types (Standardize to naive)
     if pd.api.types.is_datetime64_any_dtype(series_for_processing):
         if hasattr(series_for_processing, 'dt') and series_for_processing.dt.tz is not None:
             series_for_processing = series_for_processing.dt.tz_localize(None)
         return ps.Series(series_for_processing) if is_spark_pandas else series_for_processing
 
-    # handle numeric columns (Excel serial dates)
+    # 3. Handle Numeric Columns (Excel Serial Dates)
     if pd.api.types.is_numeric_dtype(series_for_processing):
         if is_likely_datetime_col(column_name):
             non_null_count = series_for_processing.dropna().count()
             if non_null_count > 0:
-                is_plausible_date = (series_for_processing > 1).all() and (series_for_processing < 100000).all()
-                if is_plausible_date:
+                # Plausibility check for Excel dates (Days since 1899)
+                is_plausible = (series_for_processing > 1).all() and (series_for_processing < 100000).all()
+                if is_plausible:
                     try:
-                        converted_series = pd.to_datetime(
-                            series_for_processing,
-                            origin='1899-12-30', unit='D', errors='coerce'
-                        )
-                        if converted_series.dt.tz is not None:
-                            converted_series = converted_series.dt.tz_localize(None)
-                        successfully_converted_count = converted_series.dropna().count()
-                        if successfully_converted_count / non_null_count >= 0.98:
-                            return ps.Series(converted_series) if is_spark_pandas else converted_series
+                        converted = pd.to_datetime(series_for_processing, origin='1899-12-30', unit='D', errors='coerce')
+                        if hasattr(converted, 'dt') and converted.dt.tz is not None:
+                            converted = converted.dt.tz_localize(None)
+                        
+                        if converted.dropna().count() / non_null_count >= 0.98:
+                            return ps.Series(converted) if is_spark_pandas else converted
                     except Exception:
                         pass
         return df[column_name] if is_spark_pandas else orig_series
 
-    # handle string columns
+    # 4. Handle String Columns
     elif pd.api.types.is_string_dtype(series_for_processing):
         non_null_values = series_for_processing.dropna()
         non_null_count = non_null_values.count()
-        if non_null_count > 0:
-            # try strict date formats from config
-            for fmt in getattr(Config, "COMMON_DATES", []) + getattr(Config, "COMMON_DATETIMES", []):
+        if non_null_count == 0:
+            return df[column_name] if is_spark_pandas else orig_series
+
+        # A. Try Strict Parsing from Config
+        for fmt in getattr(Config, "COMMON_DATES", []) + getattr(Config, "COMMON_DATETIMES", []):
+            try:
+                converted = pd.to_datetime(non_null_values, format=fmt, errors='raise')
+                if hasattr(converted, 'dt') and converted.dt.tz is not None:
+                    converted = converted.dt.tz_localize(None)
+                
+                if converted.notnull().sum() == non_null_count:
+                    # Construct combined series safely using reindex
+                    combined = converted.reindex(series_for_processing.index)
+                    return ps.Series(combined) if is_spark_pandas else combined
+            except (ValueError, TypeError):
+                continue
+
+        # B. Try Flexible Parsing for suggestive names
+        if is_likely_datetime_col(column_name):
+            def try_dateutil_parser(x):
                 try:
-                    converted_series = pd.to_datetime(non_null_values, format=fmt, errors='raise')
-                    if converted_series.dt.tz is not None:
-                        converted_series = converted_series.dt.tz_localize(None)
-                    successfully_converted_count = converted_series.notnull().sum()
-                    if successfully_converted_count == non_null_count:
-                        combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
-                        combined_series.loc[converted_series.index] = converted_series
-                        return ps.Series(combined_series) if is_spark_pandas else combined_series
-                except (ValueError, TypeError):
-                    continue
-
-            # flexible parsing for suggestive column names
-            if is_likely_datetime_col(column_name):
-                def try_dateutil_parser(x):
-                    try:
-                        dt = dt_parser.parse(str(x), yearfirst=False, dayfirst=False)
-                        if dt is not None and getattr(dt, 'tzinfo', None) is not None:
-                            dt = dt.replace(tzinfo=None)
-                        return dt
-                    except (ValueError, TypeError):
+                    val = str(x).strip()
+                    if not val or val.lower() in ['nan', 'none', 'null', 'nat']:
                         return pd.NaT
+                    dt = dt_parser.parse(val, yearfirst=False, dayfirst=False)
+                    return dt.replace(tzinfo=None) if dt and getattr(dt, 'tzinfo', None) else dt
+                except (ValueError, TypeError, OverflowError):
+                    return pd.NaT
 
-                converted_series = non_null_values.apply(try_dateutil_parser)
-                combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
-                combined_series.loc[converted_series.index] = converted_series
-                successfully_converted_count = combined_series.dropna().count()
-                if successfully_converted_count / non_null_count >= 0.98:
-                    if combined_series.dt.tz is not None:
-                        combined_series = combined_series.dt.tz_localize(None)
-                    return ps.Series(combined_series) if is_spark_pandas else combined_series
+            # Apply parser and force conversion to datetime type to avoid "Object Array" issues
+            parsed_values = non_null_values.apply(try_dateutil_parser)
+            combined = pd.to_datetime(parsed_values, errors='coerce').reindex(series_for_processing.index)
+            
+            # Validation check (98% success threshold)
+            success_count = combined.dropna().count()
+            if success_count / non_null_count >= 0.98:
+                return ps.Series(combined) if is_spark_pandas else combined
 
     return df[column_name] if is_spark_pandas else orig_series
 
