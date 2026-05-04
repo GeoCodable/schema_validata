@@ -3771,57 +3771,57 @@ def replace_sql_vars_in_string(sql_statement, variables_dict=Config.SQL_STATEMEN
 
 def get_rows_with_condition_spark(sql_statement, primary_table=None, error_message='Error', error_level='error'):
     """
-    Executes a SQL statement in Spark and returns rows from the result, including a unique identifier column.
+    Executes a SQL statement in Spark and returns rows from the result, 
+    efficiently building metadata using Spark native functions.
 
     Parameters
     ----------
     sql_statement : str
-        The SQL statement to execute.
+        The SQL statement to execute in Spark.
     primary_table : str, optional
-        The primary table name. If not provided, it will be extracted from the SQL.
+        The main table referenced in the SQL statement. If not provided, inferred from the query.
     error_message : str, optional
-        The error message to include in the results (default is 'Error').
+        Message to annotate error rows.
     error_level : str, optional
-        The error level to include in the results (default is 'error').
+        Severity level for error reporting.
 
     Returns
     -------
-    pd.DataFrame
-        DataFrame with columns: Primary_table, SQL_Error_Query, Message, Level, Lookup_Column, Lookup_Value, Error_Value.
+    pandas.DataFrame
+        DataFrame containing error metadata and row-level results.
+
+    Notes
+    -----
+    Assumes referenced tables exist in the Spark catalog. Returns a DataFrame 
+    with error details if the query fails or no rows are returned.
     """
-
+    # clean and prepare SQL statement for execution
     sql_statement = replace_sql_vars_in_string(sql_statement)
-
     print(f'\nRunning query: \n\t\t{sql_statement}')
-    # remove extra spaces and hidden chars
+    
     sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
     sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
-	
-    results = []
+
     try:
-        # Extract the table names and set primary table name for the SQL statement
+        # extract table names and validate existence in Spark catalog
         q_tbls = extract_all_table_names(sql_statement)
-
-        if not isinstance(primary_table, str) and not bool(primary_table):
+        if not primary_table and q_tbls:
             primary_table = q_tbls[0]
-        missing_tables = [t for t in q_tbls if not Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
+
+        missing_tables = [t for t in q_tbls if not Config.SPARK_SESSION.catalog.tableExists(t)]
         if missing_tables:
-            raise ValueError(f"The following tables from {sql_statement} do not exist in the catalog: {missing_tables}")
+            raise ValueError(f"Tables not in catalog: {missing_tables}")
 
-        # Find all unique columns in the entire query
-        sql_ref_cols = get_all_columns_from_sql(sql_statement)
-
-        # Execute the modified SQL statement
+        # execute SQL query in Spark
         spark_result = Config.SPARK_SESSION.sql(sql_statement)
-        # Force immediate execution to check for errors
+        
+        # count rows to determine if errors are present
         num_rows = spark_result.count()
         print(f"\t - Query executed successfully, found {num_rows} rows.")
-        result_df = convert_to_pyspark_pandas(spark_result)
-        result_df = handle_duplicate_columns(result_df)
 
-        if result_df is None or num_rows == 0:
-            # Append error information if no rows are returned
-            results.append({
+        if num_rows == 0:
+            # return DataFrame indicating no errors found
+            return pd.DataFrame([{
                 "Primary_table": primary_table,
                 "SQL_Error_Query": sql_statement,
                 "Message": 'OK-No rows returned',
@@ -3829,38 +3829,44 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
                 "Lookup_Column": '',
                 "Lookup_Value": '',
                 "Error_Value": ''
-            })
-        else:
-            unique_column = get_best_uid_column(result_df)
-            # Prepare the results for each row in the result DataFrame
-            for row_index, row in result_df.iterrows():
-                if sql_ref_cols is None:
-                    row_dict_str = str({col: row[col] for col in row.index})
-                else:
-                    row_dict_str = str({col: row[col] for col in sql_ref_cols if col in row.index})
-                results.append({
-                    "Primary_table": primary_table,
-                    "SQL_Error_Query": sql_statement,
-                    "Message": error_message,
-                    "Level": error_level,
-                    "Lookup_Column": unique_column,
-                    "Lookup_Value": row[unique_column],
-                    "Error_Value": row_dict_str
-                })
-				
+            }])
+
+        # process results and build error metadata
+        unique_column = get_best_uid_column(spark_result)  # best unique identifier for lookup
+        sql_ref_cols = get_all_columns_from_sql(sql_statement)  # columns referenced in SQL
+
+        # filter columns to those present in the result
+        available_cols = [c for c in spark_result.columns if (not sql_ref_cols or c in sql_ref_cols)]
+
+        # construct error report in Spark
+        final_errors_spark = spark_result.withColumn(
+            "Error_Value", F.to_json(F.struct(*[F.col(c) for c in available_cols]))
+        ).select(
+            F.lit(primary_table).alias("Primary_table"),
+            F.lit(sql_statement).alias("SQL_Error_Query"),
+            F.lit(error_message).alias("Message"),
+            F.lit(error_level).alias("Level"),
+            F.lit(unique_column).alias("Lookup_Column"),
+            F.col(unique_column).cast("string").alias("Lookup_Value"),
+            F.col("Error_Value")
+        )
+
+        # convert Spark DataFrame to Pandas for return
+        return final_errors_spark.toPandas()
+
     except Exception as e:
-        # Append error information if the SQL execution fails
-        results.append({
-            "Primary_table"     : primary_table,
-            "SQL_Error_Query"   : sql_statement,
-            "Message"           : f"SQL Query Failed: {str(e)}",
-            "Level"             : 'SQL Error',
-            "Lookup_Column"     : '',
-            "Lookup_Value"      : ''
-        })
-
-    return pd.DataFrame(results)
-
+        # handle SQL execution errors and return error metadata
+        print(f"Error in SQL execution: {e}")
+        return pd.DataFrame([{
+            "Primary_table": primary_table,
+            "SQL_Error_Query": sql_statement,
+            "Message": f"SQL Query Failed: {str(e)}",
+            "Level": 'SQL Error',
+            "Lookup_Column": '',
+            "Lookup_Value": '',
+            "Error_Value": ''
+        }])
+		
 #---------------------------------------------------------------------------------- 
 
 # def get_rows_with_condition_sqlite(tables, sql_statement, conn, error_message, error_level='error'):
@@ -3943,92 +3949,85 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
 
 def find_errors_with_sql(data_dict_path, files, sheet_name=None):
     """
-    Identifies errors in data files based on SQL rules and returns a DataFrame of errors.
+    Identifies errors in data files based on SQL rules in Databricks.
 
     Parameters
     ----------
     data_dict_path : str
-        The path to the data dictionary file (CSV or Excel) containing 
-        SQL data integrity rules.
+        Path to the data dictionary Excel file containing SQL integrity rules.
     files : list of str
-        List of paths to CSV files to be loaded into an in-memory SQLite database.
+        List of CSV file paths to be loaded as Spark temp views.
     sheet_name : str, optional
-        The name of the sheet containing the data integrity rules. Default is 'Data_Integrity'.
+        Name of the sheet containing integrity rules. Defaults to 'Data_Integrity'.
+
     Returns
     -------
     pd.DataFrame
-        A DataFrame containing the primary table name, SQL error query, lookup column, and lookup value for each error found.
+        DataFrame containing error records with columns:
+        ['Primary_table', 'SQL_Error_Query', 'Message', 'Level', 'Lookup_Column', 'Lookup_Value', 'Error_Value']
+
+    Notes
+    -----
+    Assumes referenced tables are loaded as Spark temp views. 
+    Returns an empty DataFrame if no rules or errors are found.
     """
-
-    # Initialize an empty DataFrame to store errors
-    errors_df = pd.DataFrame()
-
-    sql_ref_tables = []
+    # define schema for integrity error reporting
+    integrity_schema = ["Primary_table", "SQL_Error_Query", "Message", "Level", "Lookup_Column", "Lookup_Value", "Error_Value"]
+    errors_df = pd.DataFrame(columns=integrity_schema)
 
     if not sheet_name:
         sheet_name = 'Data_Integrity'
-    # Check if 'Data_Integrity' sheet exists in the Excel file
+
+    # load rules sheet from Excel; use pandas for small metadata files
     try:
-        excel_sheets = pd.ExcelFile(data_dict_path).sheet_names
-    except Exception:
-        print(f"Warning: Could not open '{data_dict_path}'.")
-        return errors_df
-    if sheet_name not in excel_sheets:
-        print(f"Warning: Sheet '{sheet_name}' not found in '{data_dict_path}'.")
-        return errors_df
-    if Config.USE_PYSPARK:
         pdf = pd.read_excel(to_dbfs_path(data_dict_path), sheet_name=sheet_name)
         rules_df = ps.from_pandas(pdf)
-    else:
-        rules_df = pd.read_excel(data_dict_path, sheet_name=sheet_name)
-
-    # If the sheet is empty (no rows or only headers), return empty error df
-    if rules_df is None or len(rules_df) == 0 or rules_df.dropna(how='all').empty:
-        print(f"Warning: No data integrity rules found in sheet '{sheet_name}' of '{data_dict_path}'.")
+    except Exception as e:
+        print(f"Warning: Could not open or find sheet in '{data_dict_path}': {e}")
         return errors_df
 
-    # Extract table references from each SQL rule
-    for index, row in rules_df.iterrows():
-        sql_statement = row.get('SQL Error Query', None)
-        if sql_statement is None or (isinstance(sql_statement, float) and pd.isna(sql_statement)):
+    if rules_df is None or len(rules_df) == 0:
+        return errors_df
+
+    # extract referenced tables from SQL statements for Spark registration
+    sql_ref_tables = []
+    for _, row in pdf.iterrows():
+        sql_statement = row.get('SQL Error Query')
+        if pd.isna(sql_statement): 
             continue
-        # remove extra spaces and hidden chars
-        sql_statement = re.sub(r'\s+', ' ', str(sql_statement).strip())
-        sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
-        sql_ref_tables.extend(extract_all_table_names(sql_statement))
-        sql_ref_tables = list(set(sql_ref_tables))
+        sql_ref_tables.extend(extract_all_table_names(str(sql_statement)))
+    sql_ref_tables = list(set(sql_ref_tables))
 
-    # Load CSV files into an in-memory if needed
-    conn, tables = load_files_to_sql(files, include_tables=sql_ref_tables)
+    # register CSV files as Spark temp views for SQL rule evaluation
+    load_files_to_sql(files, include_tables=sql_ref_tables)
 
-    # Iterate over each rule in the rules DataFrame
-    for index, row in rules_df.iterrows():
-        primary_table = str(row.get('Primary Table', ''))
-        sql_statement = row.get('SQL Error Query', None)
-        error_level = str(row.get('Level', ''))
-        error_message = str(row.get('Message', ''))
+    # aggregate errors from each rule into a single report
+    all_error_list = []
+    for _, row in pdf.iterrows():
+        primary_table = row.get('Primary Table')
+        sql_statement = row.get('SQL Error Query')
+        error_level = row.get('Level', 'error')
+        error_message = row.get('Message', 'Data Integrity Violation')
 
-        if sql_statement is None or (isinstance(sql_statement, float) and pd.isna(sql_statement)):
+        if pd.isna(sql_statement):
             continue
 
-        # remove extra spaces and hidden chars
-        sql_statement = re.sub(r'\s+', ' ', str(sql_statement).strip())
-        sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
+        rule_results_pdf = get_rows_with_condition_spark(
+            sql_statement=sql_statement, 
+            primary_table=primary_table, 
+            error_message=error_message, 
+            error_level=error_level
+        )
 
-        if conn == 'pyspark_pandas':
-            # Get rows that meet the condition specified in the SQL statement
-            error_rows = get_rows_with_condition_spark(
-                sql_statement=sql_statement, 
-                primary_table=primary_table, 
-                error_message=error_message, 
-                error_level=error_level
-            )
-        else:
-            error_rows = pd.DataFrame()
+        if not rule_results_pdf.empty:
+            all_error_list.append(rule_results_pdf)
 
-        # If there are any error rows, concatenate them to the errors DataFrame
-        if not error_rows.empty:
-            errors_df = pd.concat([errors_df, error_rows], ignore_index=True)
+    # combine all error results into a single DataFrame
+    if all_error_list:
+        errors_df = pd.concat(all_error_list, ignore_index=True)
+    
+    # return only the requested schema columns
+    return errors_df.reindex(columns=integrity_schema)
 
 #---------------------------------------------------------------------------------- 
 
@@ -4056,7 +4055,7 @@ def generate_integrity_summary(data_integrity_df):
     templ_df = pd.DataFrame(columns=summ_schema).astype(str)
 
     # Check if the input DataFrame is not empty
-    if len(data_integrity_df) > 0:
+    if data_integrity_df is not None and not data_integrity_df.empty:
 
         # Group by the first four columns and count the occurrences
         summary_df = (
