@@ -1214,7 +1214,7 @@ def data_dict_to_json(
     except FileNotFoundError:
         print(f"Error: File '{data_dict_file}' not found.")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        raise e
 
     return data_dict
 
