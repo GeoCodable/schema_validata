@@ -1163,7 +1163,8 @@ def data_dict_to_json(
     - Raises ValueError if required columns are missing in the DATA_INTEGRITY sheet.
     - Prints errors for missing files or other exceptions.
     """
-
+	print(f"Type of pd: {type(pd)}")
+	print(f"Value of pd: {pd}")
     # read the XLSX file and convert each sheet to a pandas dataframe
     try:
         dfs = xlsx_tabs_to_pd_dataframes(
