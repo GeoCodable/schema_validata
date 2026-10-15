@@ -13,24 +13,59 @@ from datetime import datetime               # Standard library for working with 
 from dateutil import parser as dt_parser    # Library for parsing dates from strings
 import pandas as pd                         # Library for data manipulation and analysis
 import numpy as np                          # Library for numerical operations
+
+
+# initialize these as None/False first so the rest of the 
+# package doesn't crash if Spark isn't found.
+pyspark_available = False
+ps = None
+SparkDataFrame = None
+SparkSession = None
+
 try:
     import pyspark
-    import pyspark.pandas as ps             # Library for data manipulation and analysis with Spark
-    import pyspark.sql.functions as F
-    from pyspark.sql.types import IntegerType, FloatType, StringType, DateType, TimestampType, BooleanType
-    from pyspark.sql.dataframe import DataFrame as SparkDataFrame  # Alias for Spark DataFrame class/type
-    from pyspark.sql import SparkSession
-    pyspark_available = True
+    from pyspark import SparkContext
+    
+    # Check if we are on the Driver and if the JVM bridge is active
+    # This prevents the 'JVM wasn't initialised' error on Executors
+    if os.environ.get("SPARK_EXECUTOR_ID") is None:
+        try:
+            # Attempt to access the gateway; if this fails, we are in a non-JVM context
+            if SparkContext._gateway is not None:
+                import pyspark.pandas as ps
+                import pyspark.sql.functions as F
+                from pyspark.sql.types import *
+                from pyspark.sql.dataframe import DataFrame as SparkDataFrame
+                from pyspark.sql import SparkSession
+                pyspark_available = True
+        except (AttributeError, Exception):
+            # Fallback for environments where Spark is installed but not started
+            pyspark_available = False
+    else:
+        # We are on an Executor: 
+        # We can safely import basic SQL functions, but NOT pyspark.pandas (ps)
+        import pyspark.sql.functions as F
+        from pyspark.sql.types import *
+        pyspark_available = True
+        ps = None 
 
 except ImportError:
-    print("pyspark.pandas is not available in the session.")
     pyspark_available = False
+# ---------------------------------
+
 from sqlite3 import connect                 # Standard library for creating and managing SQLite3 databases
 import sqlparse                             # Library for parsing SQL queries
 import sql_metadata                         # Library for advanced parsing of SQL queries
-from sqllineage.runner import LineageRunner # More robust libary for itentifying sql parts
+from sqllineage.runner import LineageRunner # More robust library for identifying sql parts
 import sqlglot                              # Most robust library for parsing and analyzing SQL queries
 from sqlglot.expressions import Star, Select, Table, With
+
+# --- Warnings & Options ---
+try:
+    # Ignore future warning on silent downcasting (requires pandas >= 2.2.0)
+    pd.set_option('future.no_silent_downcasting', True)
+except Exception:
+    pass
 #---------------------------------------------------------------------------------- 
 
 # List of warnings to silence
@@ -39,19 +74,22 @@ warnings_to_ignore = [
     {"message": "^Columns.*"},
     {"category": FutureWarning}
 ]
-
+#---------------------------------------------------------------------------------- 
 # Suppress the warnings
 for warning in warnings_to_ignore:
     if "category" in warning:
         warnings.filterwarnings("ignore", category=warning["category"])
     elif "message" in warning:
         warnings.filterwarnings("ignore", message=warning["message"])
+
 try:
     # Ignore future warning on silent down casting (code assumes new method)
+    # This requires pandas >= 2.2.0
     pd.set_option('future.no_silent_downcasting', True)
-except:
+except Exception:
+    # Catching 'Exception' instead of bare 'except:' is safer. 
+    # It gracefully ignores the error on older pandas versions that don't have this option.
     pass
-    
 #---------------------------------------------------------------------------------- 
 
 # Config class
@@ -76,7 +114,9 @@ class Config:
     if pyspark_available:
         USE_PYSPARK = True
         SPARK_SESSION = SparkSession.builder.appName("schema_validata").getOrCreate()
-
+    else:
+    	USE_PYSPARK = False
+	
     # Data dictionary schema
     DATA_DICT_SCHEMA = {
         "field_name": "object",
@@ -502,81 +542,89 @@ def downcast_ints(value):
 
 def get_best_uid_column(df, preferred_column=None):
     """
-    Identifies the column with the most unique values to serve as a primary key.
-
-    This function evaluates columns based on their data type and uniqueness to
-    select the best candidate for a unique identifier (UID). It prioritizes
-    columns that are fully unique and of an integer-like type. In case of a tie,
-    a preferred column is selected. A column name is always returned.
+    Selects the most appropriate unique identifier (UID) column from a DataFrame.
 
     Parameters
     ----------
-    df : pandas.DataFrame, pyspark.pandas.DataFrame, or pyspark.sql.DataFrame
-        The input DataFrame to be analyzed.
+    df : pandas.DataFrame or pyspark.pandas.DataFrame
+        Input DataFrame to evaluate for UID columns.
     preferred_column : str, optional
-        A column name to be chosen in the event of a tie for the most
-        unique values. The default is None.
+        Column name to prioritize if present.
 
     Returns
     -------
     str
-        The name of the column identified as the best UID.
-        If no suitable columns are found, it returns the preferred column
-        or the first column of the DataFrame as a fallback.
+        Name of the column selected as the best UID.
 
     Raises
     ------
     ValueError
-        If the input DataFrame is empty (has no columns).
-    """
-    # Handle different DataFrame types to work with pyspark.pandas API
-    df = convert_to_pyspark_pandas(df)
+        If the DataFrame has no columns to select from.
 
-    if df.columns.empty:
+    Notes
+    -----
+    prioritizes columns that are perfectly unique, integer types, or containing 'ID' in their name. 
+    if a preferred column is specified, it is considered in the ranking. 
+    returns the column name that best fits UID criteria, using a priority chain: uniqueness, type, name, preference, uniqueness count, and original position.
+    assumes that the DataFrame is convertible to pyspark.pandas for distributed environments.
+    """
+    # normalize DataFrame to pyspark.pandas for compatibility
+    df = convert_to_pyspark_pandas(df)
+    
+    if df is None or df.columns.empty:
         raise ValueError("DataFrame has no columns to select from.")
 
-    # A single pass to classify all columns into their respective tiers
-    uuid_candidates = []
-    int_candidates = []
-    string_candidates = []
-    float_candidates = []
-    
+    # compute total row count and unique value counts for each column
     total_len = len(df)
-
-    for col in df.columns:
-        dtype = str(df[col].dtype)
-        is_unique = df[col].nunique() == total_len
-
-        if dtype in ['string', 'object']:
-            non_null_values = df[col].dropna()
-            # Check for UUID-like strings (36-character length)
-            if not non_null_values.empty and (non_null_values.str.len() == 36).all():
-                if is_unique:
-                    uuid_candidates.append(col)
-            elif is_unique:
-                string_candidates.append(col)
-
-        elif dtype.startswith('int') or check_all_int(df[col]) == 'Int64':
-            if is_unique:
-                int_candidates.append(col)
-
-        elif dtype.startswith('float') or check_all_int(df[col]) == 'Float64':
-            if is_unique:
-                float_candidates.append(col)
-
-    # First Pass: Find a fully unique column based on the priority order
-    for candidates in [uuid_candidates, int_candidates, string_candidates, float_candidates]:
-        if candidates:
-            # Check for a preferred column tie-breaker within this tier
-            if preferred_column and preferred_column in candidates:
-                return preferred_column
-            return candidates[0]
-
-    # Second Pass: If no fully unique column exists, find the most unique one
-    if preferred_column and preferred_column in df.columns:
-        return preferred_column
+    all_uniques = df.nunique()
     
-    return df.nunique().idxmax()
+    col_scores = []
+
+    # enumerate columns to track original position for fallback
+    for i, col in enumerate(df.columns):
+        series = df[col]
+        dtype_str = str(series.dtype).lower()
+        col_name_upper = str(col).upper()
+        
+        unique_count = all_uniques[col]
+        is_perfectly_unique = (unique_count == total_len)
+        has_id_in_name = "ID" in col_name_upper
+        
+        # assign type ranking: integers, UUID strings, other strings, floats, dates, others
+        if ("int" in dtype_str) and ("bool" not in dtype_str):
+            type_rank = 1
+        elif "string" in dtype_str or "object" in dtype_str:
+            sample = series.dropna().head(1).astype(str).values
+            type_rank = 1.5 if (len(sample) > 0 and len(sample[0]) == 36) else 2
+        elif "float" in dtype_str or "decimal" in dtype_str:
+            type_rank = 3
+        elif "date" in dtype_str or "time" in dtype_str:
+            type_rank = 4
+        else:
+            type_rank = 5
+
+        # build score dictionary for sorting
+        col_scores.append({
+            'name': col,
+            'is_perfect': 0 if is_perfectly_unique else 1,
+            'type_rank': type_rank,
+            'id_bonus': 0 if has_id_in_name else 1,
+            'is_preferred': 0 if col == preferred_column else 1,
+            'unique_val': -unique_count,  # negative for descending sort
+            'original_index': i           # fallback to leftmost column
+        })
+
+    # sort columns by priority chain: uniqueness, type, name, preference, uniqueness count, position
+    sorted_cols = sorted(col_scores, key=lambda x: (
+        x['is_perfect'],
+        x['type_rank'],
+        x['id_bonus'],
+        x['is_preferred'],
+        x['unique_val'],
+        x['original_index']
+    ))
+
+    return sorted_cols[0]['name']
 	
 # ----------------------------------------------------------------------------------
 
@@ -657,64 +705,73 @@ def remove_pd_df_newlines(df, replace_char=''):
 
 def conditional_numeric_conversion(
     df,
-    null_values=Config.NA_VALUES,
-    symbols_to_strip=Config.NUMERIC_SYMBOLS
+    null_values=None,
+    symbols_to_strip=None
 ):
     """
-    Conditionally converts columns in a DataFrame to a numeric type if a majority of values convert successfully after cleaning symbols.
+    Conditionally converts object-type columns in a DataFrame to numeric types
+    if most values convert successfully after cleaning.
 
     Parameters
     ----------
     df : pandas.DataFrame
         The DataFrame to process.
     null_values : list, optional
-        A list of values to treat as NaN or missing. These values will be replaced with empty strings before conversion. 
-        Defaults to Config.NA_VALUES.
+        Values to treat as missing. These are replaced with empty strings
+        before conversion. Defaults to Config.NA_VALUES.
     symbols_to_strip : list of str, optional
-        List of symbol characters to remove from string values before attempting numeric conversion. 
-        Defaults to ['$', '%', ',', '£', '€'].
+        Symbols to remove from string values before numeric conversion.
+        Defaults to Config.NUMERIC_SYMBOLS.
 
     Returns
     -------
     pandas.DataFrame
-        The DataFrame with columns conditionally converted to numeric types where possible.
+        DataFrame with columns conditionally converted to numeric types
+        where possible.
 
     Notes
     -----
-    - Only columns of object (string) dtype are considered for conversion.
-    - Null values are replaced with empty strings before symbol removal.
-    - After symbol removal, empty strings are set to pd.NA.
-    - If conversion to numeric fails for a column, the original column is retained.
+    Only columns of object (string) dtype are considered for conversion.
+    Null values are replaced with empty strings, symbols are stripped,
+    and empty strings are set to pd.NA. If conversion fails, the original
+    column is retained.
     """
+    # set default values from config if not provided
+    if null_values is None:
+        null_values = Config.NA_VALUES
+    if symbols_to_strip is None:
+        symbols_to_strip = Config.NUMERIC_SYMBOLS
+
     df_out = df.copy()
 
+    # iterate through columns and attempt numeric conversion for object dtype columns
     for col in df_out.columns:
         if df_out[col].dtype != 'object':
             continue
 
-        # Replace all null_values with empty string in the column
-        cleaned_series = df_out[col].replace(null_values, '', regex=False)
+        # replace null values with empty string
+        cleaned_series = df_out[col].replace(null_values, '')
 
-        # Remove symbols from non-null values only
+        # remove specified symbols from string values
         cleaned_series = cleaned_series.astype(str)
         for symbol in symbols_to_strip:
             cleaned_series = cleaned_series.str.replace(
                 symbol, '', regex=False
             )
 
-        # Set empty strings back to pd.NA for conversion
+        # set empty strings to pd.NA for conversion
         cleaned_series = cleaned_series.replace('', pd.NA)
 
-        # Only attempt conversion on non-null values
+        # attempt conversion to numeric type
         try:
             test_conversion = pd.to_numeric(cleaned_series)
             df_out[col] = test_conversion
         except Exception:
-            # If conversion fails, skip modifying the column
+            # retain original column if conversion fails
             continue
 
     return df_out
-
+	
 # ----------------------------------------------------------------------------------
 
 def column_is_timestamp(df, column_name, time_format):
@@ -779,88 +836,83 @@ def is_likely_datetime_col(colname):
 
 def infer_datetime_column(df, column_name):
     """
-    Attempts to convert a DataFrame column to datetime type when appropriate.
-
-    For numeric columns (potential Excel serial dates), conversion is only attempted if the column name is suggestive of a date or time field.
-    For string columns, strict formats defined by Config are always tested; flexible parsing via dateutil is only used if the column name is suggestive.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame or pyspark.pandas.DataFrame
-        DataFrame containing the column to evaluate for datetime conversion.
-    column_name : str
-        The column name to attempt conversion.
-
-    Returns
-    -------
-    pandas.Series or pyspark.pandas.Series
-        Converted column (dtype datetime64) if inference was successful; otherwise, the original column.
+    Infers and converts a column to datetime, handling numeric, string, and existing datetime types.
+    Standardized for Databricks Standard Clusters and Pandas 3.0 compatibility.
     """
+    # 1. Determine environment
     is_spark_pandas = 'pyspark.pandas.frame.DataFrame' in str(type(df))
     series_for_processing = df[column_name].to_pandas() if is_spark_pandas else df[column_name]
     orig_series = series_for_processing.copy()
 
-    # Return immediately if the column is already of a datetime type
+    # 2. Handle existing datetime types (Standardize to naive)
     if pd.api.types.is_datetime64_any_dtype(series_for_processing):
-        return df[column_name] if is_spark_pandas else orig_series
+        if hasattr(series_for_processing, 'dt') and series_for_processing.dt.tz is not None:
+            series_for_processing = series_for_processing.dt.tz_localize(None)
+        return ps.Series(series_for_processing) if is_spark_pandas else series_for_processing
 
-    # Handle numeric columns (Excel serial dates) only if the column name is suggestive of a date/time attribute
+    # 3. Handle Numeric Columns (Excel Serial Dates)
     if pd.api.types.is_numeric_dtype(series_for_processing):
         if is_likely_datetime_col(column_name):
             non_null_count = series_for_processing.dropna().count()
             if non_null_count > 0:
-                is_plausible_date = (series_for_processing > 1).all() and (series_for_processing < 100000).all()
-                if is_plausible_date:
+                # Plausibility check for Excel dates (Days since 1899)
+                is_plausible = (series_for_processing > 1).all() and (series_for_processing < 100000).all()
+                if is_plausible:
                     try:
-                        converted_series = pd.to_datetime(
-                            series_for_processing,
-                            origin='1899-12-30', unit='D', errors='coerce'
-                        )
-                        successfully_converted_count = converted_series.dropna().count()
-                        if successfully_converted_count / non_null_count >= 0.98:
-                            return ps.Series(converted_series) if is_spark_pandas else converted_series
+                        converted = pd.to_datetime(series_for_processing, origin='1899-12-30', unit='D', errors='coerce')
+                        if hasattr(converted, 'dt') and converted.dt.tz is not None:
+                            converted = converted.dt.tz_localize(None)
+                        
+                        if converted.dropna().count() / non_null_count >= 0.98:
+                            return ps.Series(converted) if is_spark_pandas else converted
                     except Exception:
                         pass
-        # If the column name is not suggestive or conversion fails, return the original column
         return df[column_name] if is_spark_pandas else orig_series
 
-    # For string columns, always attempt conversion using strict formats; use flexible parsing only if the column name is suggestive
+    # 4. Handle String Columns
     elif pd.api.types.is_string_dtype(series_for_processing):
         non_null_values = series_for_processing.dropna()
         non_null_count = non_null_values.count()
-        if non_null_count > 0:
-            # Attempt conversion using predefined strict date formats
-            for fmt in getattr(Config, "COMMON_DATES", []) + getattr(Config, "COMMON_DATETIMES", []):
-                try:
-                    converted_series = pd.to_datetime(non_null_values, format=fmt, errors='raise')
-                    successfully_converted_count = converted_series.notnull().sum()
-                    if successfully_converted_count == non_null_count:
-                        combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
-                        combined_series.loc[converted_series.index] = converted_series
-                        return ps.Series(combined_series) if is_spark_pandas else combined_series
-                except (ValueError, TypeError):
-                    continue
-            # If strict format conversion fails, apply flexible parsing only for suggestive column names
-            if is_likely_datetime_col(column_name):
-                def try_dateutil_parser(x):
-                    try:
-                        # return dt_parser.parse(x)
-                        # yearfirst=False: interpret ambiguous dates like '01/02/2020' as month/day/year (default US style)
-                        # dayfirst=False: do not prioritize day over month in ambiguous dates; month comes first
-                        return dt_parser.parse(x, yearfirst=False, dayfirst=False)
-                    except (ValueError, TypeError):
-                        return None
-                converted_series = non_null_values.apply(try_dateutil_parser)
-                combined_series = pd.Series(index=series_for_processing.index, dtype='datetime64[ns]')
-                combined_series.loc[converted_series.index] = converted_series
-                successfully_converted_count = combined_series.dropna().count()
-                if successfully_converted_count / non_null_count >= 0.98:
-                    return ps.Series(combined_series) if is_spark_pandas else combined_series
-        # If conversion is not successful, return the original column
-        return df[column_name] if is_spark_pandas else orig_series
+        if non_null_count == 0:
+            return df[column_name] if is_spark_pandas else orig_series
 
-    # For all other column types, return the original column
+        # A. Try Strict Parsing from Config
+        for fmt in getattr(Config, "COMMON_DATES", []) + getattr(Config, "COMMON_DATETIMES", []):
+            try:
+                converted = pd.to_datetime(non_null_values, format=fmt, errors='raise')
+                if hasattr(converted, 'dt') and converted.dt.tz is not None:
+                    converted = converted.dt.tz_localize(None)
+                
+                if converted.notnull().sum() == non_null_count:
+                    # Construct combined series safely using reindex
+                    combined = converted.reindex(series_for_processing.index)
+                    return ps.Series(combined) if is_spark_pandas else combined
+            except (ValueError, TypeError):
+                continue
+
+        # B. Try Flexible Parsing for suggestive names
+        if is_likely_datetime_col(column_name):
+            def try_dateutil_parser(x):
+                try:
+                    val = str(x).strip()
+                    if not val or val.lower() in ['nan', 'none', 'null', 'nat']:
+                        return pd.NaT
+                    dt = dt_parser.parse(val, yearfirst=False, dayfirst=False)
+                    return dt.replace(tzinfo=None) if dt and getattr(dt, 'tzinfo', None) else dt
+                except (ValueError, TypeError, OverflowError):
+                    return pd.NaT
+
+            # Apply parser and force conversion to datetime type to avoid "Object Array" issues
+            parsed_values = non_null_values.apply(try_dateutil_parser)
+            combined = pd.to_datetime(parsed_values, errors='coerce').reindex(series_for_processing.index)
+            
+            # Validation check (98% success threshold)
+            success_count = combined.dropna().count()
+            if success_count / non_null_count >= 0.98:
+                return ps.Series(combined) if is_spark_pandas else combined
+
     return df[column_name] if is_spark_pandas else orig_series
+
 # ----------------------------------------------------------------------------------
 
 def detect_file_encoding(file_path):
@@ -912,7 +964,7 @@ def read_spreadsheets(
     replace_char=" ",
     na_values=None,
     parse_dates=None,
-    strip_num_symbols=False
+    strip_num_symbols=True
 ):
     """
     Reads and processes raw data from Excel (.xlsx, .xls) or CSV (.csv) files into a pandas DataFrame,
@@ -1074,51 +1126,56 @@ def xlsx_tabs_to_pd_dataframes(file_path,
 
 # ----------------------------------------------------------------------------------
 
-def data_dict_to_json(data_dict_file, 
-                      out_dir=None, 
-                      out_name=None, 
-                      na_values=Config.NA_VALUES, 
-                      na_patterns=Config.NA_PATTERNS
-                      ):
-                      
-    """Converts an XLSX data dictionary to a formatted JSON string.
-
-    Reads an XLSX file containing data dictionary information, processes 
-    it according to a schema, and generates a JSON representation.
-
-    Parameters:
-    ----------
-    data_dict_file (str): 
-        Path to the XLSX data dictionary file.
-    out_dir (str, optional): 
-        Path to the output directory for the JSON file. 
-        Defaults to None.
-    out_name (str, optional): 
-        Desired name for the output JSON file (without extension). 
-        Defaults to None.
-    na_values: (Optional) 
-        List of values to consider nulls in addition to standard nulls. 
-        (default: None)
-    na_patterns: (Optional) 
-        List of regular expressions to identify strings representing missing values. 
-        (default: None)
-    Returns:
-    -------
-        json_string (str):
-        Formatted JSON string representing the processed data dictionary.
+def data_dict_to_json(
+    data_dict_file, 
+    out_dir=None, 
+    out_name=None, 
+    na_values=Config.NA_VALUES, 
+    na_patterns=Config.NA_PATTERNS
+):
     """
-    try:
-        # Read the xlxs data dictionary file, convert each tab into a dataframe, 
-        # Return a dictionary {tabName: dataframe}
-        dfs = xlsx_tabs_to_pd_dataframes(data_dict_file,
-                                         rm_newlines=True, 
-                                         replace_char='',
-                                         infer=True,
-                                         na_values=na_values,
-                                         na_patterns=na_patterns
-                                         )
+    Convert an XLSX data dictionary to a formatted JSON string.
 
-        # Iterate through the dataframes to create a new subset dictionary
+    Parameters
+    ----------
+    data_dict_file : str
+        Path to the XLSX data dictionary file.
+    out_dir : str, optional
+        Output directory for the JSON file. Defaults to None.
+    out_name : str, optional
+        Desired name for the output JSON file (without extension). Defaults to None.
+    na_values : list, optional
+        List of values to consider as nulls in addition to standard nulls.
+    na_patterns : list, optional
+        List of regular expressions to identify strings representing missing values.
+
+    Returns
+    -------
+    dict
+        Formatted dictionary representing the processed data dictionary.
+
+    Notes
+    -----
+    - Assumes the XLSX file contains sheets matching the expected schema.
+    - Only sheets with required columns and non-empty data are processed.
+    - Data types are enforced based on schema definitions.
+    - Nested string literals are converted to Python objects.
+    - If out_dir and out_name are provided, the JSON is saved to disk.
+    - Raises ValueError if required columns are missing in the DATA_INTEGRITY sheet.
+    - Prints errors for missing files or other exceptions.
+    """
+    # read the XLSX file and convert each sheet to a pandas dataframe
+    try:
+        dfs = xlsx_tabs_to_pd_dataframes(
+            data_dict_file,
+            rm_newlines=True, 
+            replace_char='',
+            infer=True,
+            na_values=na_values,
+            na_patterns=na_patterns
+        )
+
+        # process each sheet and build the data dictionary
         data_dict = {}
         for sheet_name, df in dfs.items():
             if sheet_name.lower() == 'data_integrity':
@@ -1126,40 +1183,38 @@ def data_dict_to_json(data_dict_file,
                 missing_columns = set(Config.DATA_INTEGRITY_SCHEMA.keys()) - set(df.columns)
                 if missing_columns:
                     raise ValueError(f"Warning: Missing columns in DATA_INTEGRITY sheet schema: {missing_columns}")
-		
-            # Check if each sheet/tab matches the data dictionary columns/schema and is not empty
+
+            # validate sheet schema and ensure non-empty data
             if set(Config.DATA_DICT_SCHEMA.keys()).issubset(set(df.columns)) and len(df) != 0:
-                # Ensure data types
-                if isinstance(df, ps.DataFrame):
-                    df = df.to_pandas()
+                if not isinstance(df, pd.DataFrame):
+                    try:
+                        df = df.to_pandas()
+                    except Exception:
+                        print(f"WARNING: Could not convert object of type {type(df)} to pandas DataFrame.")
                 df_with_types = df.astype(Config.DATA_DICT_SCHEMA, errors='ignore')
-                # Ignore rows without a field/column name
-                df_with_types = df_with_types.dropna(subset=[Config.DATA_DICT_PRIMARY_KEY], 
-                                                     inplace=False)
-                
-                # Convert the dataframes into dictionaries for easier lookup
-                df_with_types = df_with_types.set_index(Config.DATA_DICT_PRIMARY_KEY) 
-                sheet_schema = json.loads(df_with_types.to_json(orient='index')) 
-                sheet_schema = {k: {**v, Config.DATA_DICT_PRIMARY_KEY: k} 
-                                for k, v in sheet_schema.items()}
+                # drop rows without a field/column name
+                df_with_types = df_with_types.dropna(subset=[Config.DATA_DICT_PRIMARY_KEY], inplace=False)
+                # convert dataframe to dictionary for easier lookup
+                df_with_types = df_with_types.set_index(Config.DATA_DICT_PRIMARY_KEY)
+                sheet_schema = json.loads(df_with_types.to_json(orient='index'))
+                sheet_schema = {k: {**v, Config.DATA_DICT_PRIMARY_KEY: k} for k, v in sheet_schema.items()}
                 data_dict[sheet_name] = sheet_schema
 
-        # Convert any nested string literal lists, dicts, tuples into Python objects
+        # convert nested string literals to Python objects
         data_dict = eval_nested_string_literals(data_dict)
 
+        # save JSON to disk if output path is specified
         if out_dir and out_name:
-            # Convert the dictionary to a formatted JSON string
             json_string = json.dumps(data_dict, indent=4, sort_keys=True, cls=Config.jsonEncoder)
             output_path = os.path.join(out_dir, f'{out_name}.json')
-            # Save the JSON text to a file
             with open(output_path, "w") as f:
                 f.write(json_string)
             print(f'Data saved to: {output_path}')
 
     except FileNotFoundError:
         print(f"Error: File '{data_dict_file}' not found.")
-    except Exception as e:  # Catch any type of exception
-        print(f"An error occurred: {e}")  # Print the error message
+    except Exception as e:
+        raise e
 
     return data_dict
 
@@ -1329,6 +1384,24 @@ def check_all_int(df_col):
             _s.astype('Float64')
             return 'Float64'
         except (ValueError, TypeError):
+            # Fallback: strip configured numeric symbols (%, $, commas …)
+            # and retry, so columns like "75%", "$1,250" are recognized.
+            try:
+                stripped = _s.astype(str)
+                for sym in Config.NUMERIC_SYMBOLS:
+                    stripped = stripped.str.replace(sym, '', regex=False)
+                stripped = stripped.str.strip().replace('', pd.NA).dropna()
+                if stripped.empty:
+                    return str
+                numeric = pd.to_numeric(stripped, errors='coerce')
+                if numeric.notna().all():
+                    try:
+                        numeric.astype('Int64')
+                        return 'Int64'
+                    except (OverflowError, ValueError, TypeError):
+                        return 'Float64'
+            except Exception:
+                pass
             # If all numeric conversions fail, it's a string.
             return str
 #---------------------------------------------------------------------------------- 
@@ -1440,7 +1513,12 @@ def read_df_with_optimal_dtypes(
 
 
     # Initial read: attempt to detect all null-like values in the data
-    df = read_spreadsheet_with_params(file_path, sheet_name, str, na_values)
+    # Use strip_num_symbols=False so raw values like "75%" are preserved for inference
+    df = read_spreadsheets(
+        file_path, sheet_name=sheet_name, dtype=str,
+        rm_newlines=True, replace_char='', na_values=na_values,
+        strip_num_symbols=False
+    )
     read_as_na = na_values.copy()
     for col in df.columns:
         null_p_vals = [
@@ -1475,7 +1553,12 @@ def read_df_with_optimal_dtypes(
             pass
 
     # Fallback pandas-based inference (always performed for robustness)
-    df = read_spreadsheet_with_params(file_path, sheet_name, str, read_as_na)
+    # Use strip_num_symbols=False so raw values like "75%" are preserved for inference
+    df = read_spreadsheets(
+        file_path, sheet_name=sheet_name, dtype=str,
+        rm_newlines=True, replace_char='', na_values=read_as_na,
+        strip_num_symbols=False
+    )
     for col in df.columns:
         # If Spark already determined date type, retain it
         if 'date' in str(dtypes.get(col)):
@@ -1522,6 +1605,18 @@ def read_df_with_optimal_dtypes(
             col: type_str for col, type_str in dtypes.items() 
             if type_str != 'datetime64[ns]'
         }
+        # Override symbol-bearing numeric columns to str for the pd.read_csv
+        # call; conditional_numeric_conversion inside read_spreadsheets will
+        # handle the safe conversion afterwards.
+        if strip_num_symbols:
+            for col in list(read_dtype.keys()):
+                if read_dtype[col] in ('Int64', 'Float64'):
+                    raw_vals = df[col].dropna().astype(str)
+                    if raw_vals.apply(
+                        lambda x: any(s in x for s in Config.NUMERIC_SYMBOLS)
+                    ).any():
+                        read_dtype[col] = str
+
         # If no datetime columns were found, set parse_dates to None.
         if not parse_dates:
             parse_dates = None
@@ -1532,7 +1627,8 @@ def read_df_with_optimal_dtypes(
         sheet_name=sheet_name,
         dtype=read_dtype,
         na_values=read_as_na,
-        parse_dates=parse_dates
+        parse_dates=parse_dates,
+        strip_num_symbols=strip_num_symbols
     )
 
     if strip_num_symbols:
@@ -1543,6 +1639,9 @@ def read_df_with_optimal_dtypes(
         warnings.simplefilter("ignore", RuntimeWarning)
         try:
             for col in df.columns:
+                # skip if we already know it's all-null
+                if dtypes.get(col) == "Null-Unknown":
+                    continue
                 if pd.api.types.is_string_dtype(df[col]):
                     df[col] = infer_datetime_column(df, col)
         except Exception:
@@ -1550,149 +1649,199 @@ def read_df_with_optimal_dtypes(
             pass
 
     return df
+    
 #---------------------------------------------------------------------------------- 
 
 def infer_data_types(series):
-	"""
-	Robustly infers the data type of a pandas or Spark Series.
+    """
+    Infers the data type of a pandas or Spark Series using robust null and datetime detection.
 
-	This function uses enhanced null and datetime detection logic
-	to determine the most appropriate data type for a given series.
-	It returns a canonical string representation of the inferred type.
+    This function analyzes a series to determine its most appropriate data type, returning a canonical string.
+    Enhanced null and datetime detection logic is used to improve reliability. Assumes input is a pandas.Series
+    or pyspark.pandas.Series. Returns one of "Null-Unknown", "Boolean", "Integer", "Float", "Datetime", "String", or "Other".
 
-	Parameters
-	----------
-	series : pandas.Series or pyspark.pandas.Series
-		The series/column to analyze.
+    Parameters
+    ----------
+    series : pandas.Series or pyspark.pandas.Series
+        Series or column to analyze.
 
-	Returns
-	-------
-	str
-		One of "Null-Unknown", "Boolean", "Integer", "Float",
-		"Datetime", "String", or "Other".
+    Returns
+    -------
+    str
+        Canonical string representing the inferred data type.
+    """
 
-	"""
+    # check for Spark pandas and convert if needed
+    is_spark_pandas = False
+    series_for_processing = series
 
-	# Check for Spark pandas and convert the series for processing
-	# if necessary. This check is simplified for this example.
-	is_spark_pandas = False
-	series_for_processing = series
+    # retrieve null values and patterns from config
+    null_types = set(getattr(Config, "NA_VALUES", []))
+    null_patterns = getattr(Config, "NA_PATTERNS", [])
 
-	# Use Config to get the sets of null values and regex patterns.
-	null_types = set(getattr(Config, "NA_VALUES", []))
-	null_patterns = getattr(Config, "NA_PATTERNS", [])
+    # mask for nulls using check_na_value helper
+    mask = series_for_processing.apply(
+        lambda x: check_na_value(
+            x,
+            na_values=null_types,
+            na_patterns=null_patterns
+        )
+    )
 
-    # Mask for nulls
-	mask = series_for_processing.apply(
-		lambda x: check_na_value(
-			x,
-			na_values=null_types,
-			na_patterns=null_patterns
-		)
-	)
+    # filter out null values for type inference
+    non_null_series = series_for_processing[~mask]
 
-	non_null_series = series_for_processing[~mask]
+    if non_null_series.count() == 0:
+        return "Null-Unknown"
 
-	if non_null_series.count() == 0:
-		return "Null-Unknown"
+    # attempt datetime detection, fallback to string if parsing fails
+    try:
+        if is_spark_pandas:
+            df_temp = series_for_processing.to_frame()
+        else:
+            df_temp = pd.DataFrame({series_for_processing.name: series_for_processing})
+        
+        result_series = infer_datetime_column(df_temp, series_for_processing.name)
+        result_dtype = str(result_series.dtype)
+        
+        if "datetime" in result_dtype or "date" in result_dtype:
+            valid_ratio = result_series.notnull().mean()
+            if valid_ratio > 0.7:
+                return "Datetime"
+    except Exception as e:
+        # pass if datetime parsing fails
+        pass
 
-	# Datetime detection logic. The series must be in a DataFrame
-	# for the infer_datetime_column helper function.
-	if is_spark_pandas:
-		df_temp = series_for_processing.to_frame()
-	else:
-		df_temp = pd.DataFrame({series_for_processing.name: series_for_processing})
-	
-	result_series = infer_datetime_column(df_temp, series_for_processing.name)
-	result_dtype = str(result_series.dtype)
-	if "datetime" in result_dtype or "date" in result_dtype:
-		valid_ratio = result_series.notnull().mean()
-		if valid_ratio > 0.7:
-			return "Datetime"
+    # check for boolean, integer, and float types
+    if pd.api.types.is_bool_dtype(non_null_series):
+        return "Boolean"
+    if pd.api.types.is_integer_dtype(non_null_series):
+        return "Integer"
+    if pd.api.types.is_float_dtype(non_null_series):
+        return "Float"
 
-	# Check for various data types and return the corresponding canonical string.
-	if pd.api.types.is_bool_dtype(non_null_series):
-		return "Boolean"
-	if pd.api.types.is_integer_dtype(non_null_series):
-		return "Integer"
-	if pd.api.types.is_float_dtype(non_null_series):
-		return "Float"
+    # handle object or string types, check for numeric conversion
+    if (
+        pd.api.types.is_object_dtype(non_null_series) or
+        pd.api.types.is_string_dtype(non_null_series)
+    ):
+        inferred_type = check_all_int(non_null_series)
+        if inferred_type == 'Int64':
+            return "Integer"
+        elif inferred_type == 'Float64':
+            return "Float"
+        else:
+            return "String"
 
-	# If the type is an object or string, use the check_all_int
-	# helper to determine if it can be a numeric type.
-	if (
-		pd.api.types.is_object_dtype(non_null_series) or
-		pd.api.types.is_string_dtype(non_null_series)
-	):
-		inferred_type = check_all_int(non_null_series)
-		if inferred_type == 'Int64':
-			return "Integer"
-		elif inferred_type == 'Float64':
-			return "Float"
-		else:
-			return "String"
-
-	return "Other"
-
+    return "Other"
 			
 #---------------------------------------------------------------------------------- 
 
-def check_na_value(value, na_values=Config.NA_VALUES, na_patterns=Config.NA_PATTERNS):
-	"""
-	Checks if a value is considered a missing value.
+def check_na_value(value, na_values=None, na_patterns=None):
+    """
+    Determines if a value should be considered missing, null, or pseudo-null.
 
-	The function uses predefined patterns and custom values to determine
-	if a given value should be treated as null.
+    Parameters
+    ----------
+    value : Any
+        The value to check for null or pseudo-null status.
+    na_values : list, optional
+        List of values considered null. Defaults to Config.NA_VALUES.
+    na_patterns : list, optional
+        List of regex patterns considered null. Defaults to Config.NA_PATTERNS.
 
-	Parameters
-	----------
-	value : Any
-		The value to be checked.
-	na_values : list, optional
-		A list of values to consider as nulls in addition to standard
-		nulls (e.g., `None`, `NaN`). Defaults to `Config.NA_VALUES`.
-	na_patterns : list, optional
-		A list of regular expressions to identify strings that represent
-		missing values. Defaults to `Config.NA_PATTERNS`.
+    Returns
+    -------
+    bool
+        True if the value is null, empty, or matches a pseudo-null definition; False otherwise.
 
-	Returns
-	-------
-	bool
-		True if the value is a missing/null value, False otherwise.
+    Notes
+    -----
+    - Handles invisible Unicode and control characters for robust null detection.
+    - Assumes Config.NA_VALUES and Config.NA_PATTERNS are defined externally.
+    - For string values, checks both direct matches and regex patterns.
+    - For non-string values, checks direct match in na_values.
+    """
+    # use defaults from Config if not provided
+    if na_values is None:
+        na_values = Config.NA_VALUES
+    if na_patterns is None:
+        na_patterns = Config.NA_PATTERNS
 
-	"""
-	# Check for standard null values (e.g., np.nan, None).
-	if pd.isna(value) or value is None:
-		return True
+    # check for standard null values (NaN, None, NaT)
+    if pd.isna(value):
+        return True
 
-	# If the value is a string, check patterns and values.
-	elif isinstance(value, str):
-		# If na_patterns are defined, check for a regex match.
-		if na_patterns:
-			# The patterns are compiled with IGNORECASE for case-
-			# insensitive matching.
-			compiled_patterns = [re.compile(p, re.IGNORECASE) for p in na_patterns]
-			if any(p.search(value) for p in compiled_patterns):
-				return True
+    if isinstance(value, str):
+        # remove invisible Unicode characters and control characters
+        chars_to_remove = r'[\u200b-\u200f\ufeff\u00a0\u0000-\u001f]'
+        clean_val = re.sub(chars_to_remove, '', value)
 
-		# If na_values are defined, check for a direct match.
-		if na_values:
-			# Check for an empty string after stripping whitespace.
-			if not value.strip():
-				return True
-			
-			# Create a list of lowercase na_values. The list
-			# comprehension safely handles non-string elements.
-			lowercase_na_values = [v.lower() for v in na_values if isinstance(v, str)]
-			if value.lower() in lowercase_na_values:
-				return True
+        # check for empty string after removing invisible characters and whitespace
+        if not clean_val.strip():
+            return True
 
-	# For non-string values, check for a direct match in na_values.
-	elif na_values and value in na_values:
-		return True
+        # check regex patterns against cleaned string
+        if na_patterns:
+            for p in na_patterns:
+                if re.search(p, clean_val, re.IGNORECASE):
+                    return True
 
-	return False
+        # check direct matches against cleaned string (case-insensitive)
+        if na_values:
+            lower_clean = clean_val.lower()
+            if any(lower_clean == str(v).lower() for v in na_values):
+                return True
 
+    # for non-string values, check for direct match in na_values
+    elif na_values and value in na_values:
+        return True
+
+    return False
+
+#---------------------------------------------------------------------------------- 
+
+def drop_empty_unnamed_columns(df, na_values=None, na_patterns=None):
+    """
+    Removes columns matching the 'Unnamed' pattern if all values are null or pseudo-null.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame to clean.
+    na_values : list, optional
+        Values considered empty. Defaults to Config.NA_VALUES.
+    na_patterns : list, optional
+        Regex patterns considered empty. Defaults to Config.NA_PATTERNS.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with empty unnamed columns removed.
+
+    Notes
+    -----
+    - Only columns matching the 'Unnamed' pattern are considered for removal.
+    - Uses check_na_value for robust null/empty detection.
+    - Assumes Config.NA_VALUES and Config.NA_PATTERNS are defined externally.
+    """
+    # compile regex for 'Unnamed' columns (e.g., 'Unnamed: 1', 'Unnamed_2')
+    pattern = re.compile(r'^unnamed[:_]\s?\d+$', re.IGNORECASE)
+    unnamed_cols = [col for col in df.columns if pattern.match(str(col))]
+
+    # identify which 'Unnamed' columns are empty using check_na_value for each cell
+    cols_to_drop = [
+        col for col in unnamed_cols
+        if df[col].apply(lambda x: check_na_value(x, na_values, na_patterns)).all()
+    ]
+
+    if cols_to_drop:
+        print(f"\t-Removed columns: {cols_to_drop}")
+        print(f"\t\t-Reason: All values matched null/Config NA and name matched 'Unnamed' pattern")
+
+    # drop the identified columns and return the cleaned DataFrame
+    return df.drop(columns=cols_to_drop)
+	
 #---------------------------------------------------------------------------------- 
 
 def series_hasNull(series, 
@@ -3558,58 +3707,50 @@ def handle_duplicate_columns(df):
 
 def convert_to_pyspark_pandas(df):
     """
-    Convert a DataFrame to a pyspark.pandas DataFrame.
-
-    This function attempts to convert the input DataFrame to a pyspark.pandas DataFrame
-    using the most efficient method available. It supports conversion from Spark DataFrame
-    and pandas DataFrame. If the input is already a pyspark.pandas DataFrame, it is returned as is.
+    Ensures Pandas DataFrames are compatible with Spark engine.
+    New: Handles timezone-aware datetimes and mixed-type object columns.
 
     Parameters
     ----------
-    df : pyspark.sql.DataFrame or pandas.DataFrame or pyspark.pandas.DataFrame or None
-        The input DataFrame to convert.
+    df : pandas.DataFrame or pyspark.pandas.DataFrame
+        Input DataFrame to sanitize and convert.
 
     Returns
     -------
-    pyspark.pandas.DataFrame
-        The converted pyspark.pandas DataFrame, or an empty pyspark.pandas DataFrame
-        if conversion fails or the input is None.
+    pyspark.pandas.DataFrame or pandas.DataFrame
+        Converted DataFrame suitable for Spark processing.
 
-    Examples
-    --------
-    >>> convert_to_pyspark_pandas(spark_df)
-    >>> convert_to_pyspark_pandas(pandas_df)
-    >>> convert_to_pyspark_pandas(None)
+    Notes
+    -----
+    strips timezones from datetime columns and converts object columns to strings.
+    falls back to pandas DataFrame if conversion fails.
     """
-    if df is None:
-        return ps.DataFrame()
-
-    if isinstance(df, ps.DataFrame):
+    import pyspark.pandas as ps
+    
+    # already a Spark-Pandas DataFrame
+    if 'pyspark.pandas' in str(type(df)):
         return df
 
-    result_df = None
-    try:
-        if isinstance(df, SparkDataFrame):
-            result_df = df.pandas_api()
-        elif isinstance(df, pd.DataFrame):
-            result_df = ps.from_pandas(df)
-    except Exception as e:
-        print(f"Trying legacy conversion to pyspark.pandas due to: {e}")
+    if isinstance(df, pd.DataFrame):
+        # strip timezones: Spark standard clusters require timezone-naive datetimes
+        dt_cols = df.select_dtypes(include=['datetime', 'datetimetz']).columns
+        for col in dt_cols:
+            if hasattr(df[col], 'dt') and df[col].dt.tz is not None:
+                df[col] = df[col].dt.tz_localize(None)
+        
+        # sanitize objects: convert UUIDs and mixed types to clean strings
+        obj_cols = df.select_dtypes(include=['object', 'string']).columns
+        for col in obj_cols:
+            df[col] = df[col].astype(str).replace(['nan', 'None'], np.nan)
+
         try:
-            if isinstance(df,SparkDataFrame ):
-                # Fallback to a legacy method (less efficient for large data)
-                result_df = ps.from_pandas(df.toPandas())
-            elif isinstance(df, pd.DataFrame):
-                # Fallback to a legacy method
-                result_df = ps.DataFrame(df)
-        except Exception as e2:
-            print(f"Fallback conversion to pyspark.pandas failed: {e2}")
-            # If all conversions fail, return an empty DataFrame
-            return ps.DataFrame()
-    
-    # If a conversion was successful, return the result, otherwise return an empty DataFrame
-    return result_df if result_df is not None else df
-	
+            return ps.from_pandas(df)
+        except Exception as e:
+            print(f"Warning: Spark conversion failed ({e}). Proceeding with standard Pandas.")
+            return df
+            
+    return df
+
 #----------------------------------------------------------------------------------
 
 def find_sql_variables_in_query(sql_statement, variables_dict=Config.SQL_STATEMENT_VARS):
@@ -3676,57 +3817,57 @@ def replace_sql_vars_in_string(sql_statement, variables_dict=Config.SQL_STATEMEN
 
 def get_rows_with_condition_spark(sql_statement, primary_table=None, error_message='Error', error_level='error'):
     """
-    Executes a SQL statement in Spark and returns rows from the result, including a unique identifier column.
+    Executes a SQL statement in Spark and returns rows from the result, 
+    efficiently building metadata using Spark native functions.
 
     Parameters
     ----------
     sql_statement : str
-        The SQL statement to execute.
+        The SQL statement to execute in Spark.
     primary_table : str, optional
-        The primary table name. If not provided, it will be extracted from the SQL.
+        The main table referenced in the SQL statement. If not provided, inferred from the query.
     error_message : str, optional
-        The error message to include in the results (default is 'Error').
+        Message to annotate error rows.
     error_level : str, optional
-        The error level to include in the results (default is 'error').
+        Severity level for error reporting.
 
     Returns
     -------
-    pd.DataFrame
-        DataFrame with columns: Primary_table, SQL_Error_Query, Message, Level, Lookup_Column, Lookup_Value, Error_Value.
+    pandas.DataFrame
+        DataFrame containing error metadata and row-level results.
+
+    Notes
+    -----
+    Assumes referenced tables exist in the Spark catalog. Returns a DataFrame 
+    with error details if the query fails or no rows are returned.
     """
-
+    # clean and prepare SQL statement for execution
     sql_statement = replace_sql_vars_in_string(sql_statement)
-
     print(f'\nRunning query: \n\t\t{sql_statement}')
-    # remove extra spaces and hidden chars
+    
     sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
     sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
-	
-    results = []
+
     try:
-        # Extract the table names and set primary table name for the SQL statement
+        # extract table names and validate existence in Spark catalog
         q_tbls = extract_all_table_names(sql_statement)
-
-        if not isinstance(primary_table, str) and not bool(primary_table):
+        if not primary_table and q_tbls:
             primary_table = q_tbls[0]
-        missing_tables = [t for t in q_tbls if not Config.SPARK_SESSION._jsparkSession.catalog().tableExists(t)]
+
+        missing_tables = [t for t in q_tbls if not Config.SPARK_SESSION.catalog.tableExists(t)]
         if missing_tables:
-            raise ValueError(f"The following tables from {sql_statement} do not exist in the catalog: {missing_tables}")
+            raise ValueError(f"Tables not in catalog: {missing_tables}")
 
-        # Find all unique columns in the entire query
-        sql_ref_cols = get_all_columns_from_sql(sql_statement)
-
-        # Execute the modified SQL statement
+        # execute SQL query in Spark
         spark_result = Config.SPARK_SESSION.sql(sql_statement)
-        # Force immediate execution to check for errors
+        
+        # count rows to determine if errors are present
         num_rows = spark_result.count()
         print(f"\t - Query executed successfully, found {num_rows} rows.")
-        result_df = convert_to_pyspark_pandas(spark_result)
-        result_df = handle_duplicate_columns(result_df)
 
-        if result_df is None or num_rows == 0:
-            # Append error information if no rows are returned
-            results.append({
+        if num_rows == 0:
+            # return DataFrame indicating no errors found
+            return pd.DataFrame([{
                 "Primary_table": primary_table,
                 "SQL_Error_Query": sql_statement,
                 "Message": 'OK-No rows returned',
@@ -3734,38 +3875,44 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
                 "Lookup_Column": '',
                 "Lookup_Value": '',
                 "Error_Value": ''
-            })
-        else:
-            unique_column = get_best_uid_column(result_df)
-            # Prepare the results for each row in the result DataFrame
-            for row_index, row in result_df.iterrows():
-                if sql_ref_cols is None:
-                    row_dict_str = str({col: row[col] for col in row.index})
-                else:
-                    row_dict_str = str({col: row[col] for col in sql_ref_cols if col in row.index})
-                results.append({
-                    "Primary_table": primary_table,
-                    "SQL_Error_Query": sql_statement,
-                    "Message": error_message,
-                    "Level": error_level,
-                    "Lookup_Column": unique_column,
-                    "Lookup_Value": row[unique_column],
-                    "Error_Value": row_dict_str
-                })
-				
+            }])
+
+        # process results and build error metadata
+        unique_column = get_best_uid_column(spark_result)  # best unique identifier for lookup
+        sql_ref_cols = get_all_columns_from_sql(sql_statement)  # columns referenced in SQL
+
+        # filter columns to those present in the result
+        available_cols = [c for c in spark_result.columns if (not sql_ref_cols or c in sql_ref_cols)]
+
+        # construct error report in Spark
+        final_errors_spark = spark_result.withColumn(
+            "Error_Value", F.to_json(F.struct(*[F.col(c) for c in available_cols]))
+        ).select(
+            F.lit(primary_table).alias("Primary_table"),
+            F.lit(sql_statement).alias("SQL_Error_Query"),
+            F.lit(error_message).alias("Message"),
+            F.lit(error_level).alias("Level"),
+            F.lit(unique_column).alias("Lookup_Column"),
+            F.col(unique_column).cast("string").alias("Lookup_Value"),
+            F.col("Error_Value")
+        )
+
+        # convert Spark DataFrame to Pandas for return
+        return final_errors_spark.toPandas()
+
     except Exception as e:
-        # Append error information if the SQL execution fails
-        results.append({
-            "Primary_table"     : primary_table,
-            "SQL_Error_Query"   : sql_statement,
-            "Message"           : f"SQL Query Failed: {str(e)}",
-            "Level"             : 'SQL Error',
-            "Lookup_Column"     : '',
-            "Lookup_Value"      : ''
-        })
-
-    return pd.DataFrame(results)
-
+        # handle SQL execution errors and return error metadata
+        print(f"Error in SQL execution: {e}")
+        return pd.DataFrame([{
+            "Primary_table": primary_table,
+            "SQL_Error_Query": sql_statement,
+            "Message": f"SQL Query Failed: {str(e)}",
+            "Level": 'SQL Error',
+            "Lookup_Column": '',
+            "Lookup_Value": '',
+            "Error_Value": ''
+        }])
+		
 #---------------------------------------------------------------------------------- 
 
 # def get_rows_with_condition_sqlite(tables, sql_statement, conn, error_message, error_level='error'):
@@ -3848,74 +3995,85 @@ def get_rows_with_condition_spark(sql_statement, primary_table=None, error_messa
 
 def find_errors_with_sql(data_dict_path, files, sheet_name=None):
     """
-    Identifies errors in data files based on SQL rules and returns a DataFrame of errors.
+    Identifies errors in data files based on SQL rules in Databricks.
 
     Parameters
     ----------
     data_dict_path : str
-        The path to the data dictionary file (CSV or Excel) containing 
-        SQL data integrity rules.
+        Path to the data dictionary Excel file containing SQL integrity rules.
     files : list of str
-        List of paths to CSV files to be loaded into an in-memory SQLite database.
+        List of CSV file paths to be loaded as Spark temp views.
+    sheet_name : str, optional
+        Name of the sheet containing integrity rules. Defaults to 'Data_Integrity'.
 
     Returns
     -------
     pd.DataFrame
-        A DataFrame containing the primary table name, SQL error query, lookup column, and lookup value for each error found.
+        DataFrame containing error records with columns:
+        ['Primary_table', 'SQL_Error_Query', 'Message', 'Level', 'Lookup_Column', 'Lookup_Value', 'Error_Value']
+
+    Notes
+    -----
+    Assumes referenced tables are loaded as Spark temp views. 
+    Returns an empty DataFrame if no rules or errors are found.
     """
-
-    # Initialize an empty DataFrame to store errors
-    errors_df = pd.DataFrame()
-
-    sql_ref_tables = []
+    # define schema for integrity error reporting
+    integrity_schema = ["Primary_table", "SQL_Error_Query", "Message", "Level", "Lookup_Column", "Lookup_Value", "Error_Value"]
+    errors_df = pd.DataFrame(columns=integrity_schema)
 
     if not sheet_name:
         sheet_name = 'Data_Integrity'
-    # Check if 'Data_Integrity' sheet exists in the Excel file
-    if sheet_name in pd.ExcelFile(data_dict_path).sheet_names:
-        if Config.USE_PYSPARK:
-            pdf = pd.read_excel(to_dbfs_path(data_dict_path), sheet_name=sheet_name)
-            rules_df = ps.from_pandas(pdf)
-        else:
-            rules_df = pd.read_excel(data_dict_path, sheet_name=sheet_name)
 
-    # Extract table references from each SQL rule
-    for index, row in rules_df.iterrows():
-        sql_statement = row['SQL Error Query']
-        # remove extra spaces and hidden chars
-        sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
-        sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
-        sql_ref_tables.extend(extract_all_table_names(sql_statement))
-        sql_ref_tables = list(set(sql_ref_tables))
+    # load rules sheet from Excel; use pandas for small metadata files
+    try:
+        pdf = pd.read_excel(to_dbfs_path(data_dict_path), sheet_name=sheet_name)
+        rules_df = ps.from_pandas(pdf)
+    except Exception as e:
+        print(f"Warning: Could not open or find sheet in '{data_dict_path}': {e}")
+        return errors_df
 
-    # Load CSV files into an in-memory if needed
-    conn, tables = load_files_to_sql(files, include_tables=sql_ref_tables)
+    if rules_df is None or len(rules_df) == 0:
+        return errors_df
 
-    # Iterate over each rule in the rules DataFrame
-    for index, row in rules_df.iterrows():
-        primary_table = str(row['Primary Table'])
-        sql_statement = row['SQL Error Query']
-        error_level = str(row['Level'])
-        error_message = str(row['Message'])
+    # extract referenced tables from SQL statements for Spark registration
+    sql_ref_tables = []
+    for _, row in pdf.iterrows():
+        sql_statement = row.get('SQL Error Query')
+        if pd.isna(sql_statement): 
+            continue
+        sql_ref_tables.extend(extract_all_table_names(str(sql_statement)))
+    sql_ref_tables = list(set(sql_ref_tables))
 
-        # remove extra spaces and hidden chars
-        sql_statement = re.sub(r'\s+', ' ', sql_statement.strip())
-        sql_statement = re.sub(r'[\x00-\x1F\x7F\u200B\uFEFF]', '', sql_statement, flags=re.UNICODE)
+    # register CSV files as Spark temp views for SQL rule evaluation
+    load_files_to_sql(files, include_tables=sql_ref_tables)
 
-        if conn == 'pyspark_pandas':
-            # Get rows that meet the condition specified in the SQL statement
-            error_rows = get_rows_with_condition_spark(
-                sql_statement=sql_statement, 
-                primary_table=primary_table, 
-                error_message=error_message, 
-                error_level=error_level
-            )
+    # aggregate errors from each rule into a single report
+    all_error_list = []
+    for _, row in pdf.iterrows():
+        primary_table = row.get('Primary Table')
+        sql_statement = row.get('SQL Error Query')
+        error_level = row.get('Level', 'error')
+        error_message = row.get('Message', 'Data Integrity Violation')
 
-        # If there are any error rows, concatenate them to the errors DataFrame
-        if not error_rows.empty:
-            errors_df = pd.concat([errors_df, error_rows], ignore_index=True)
+        if pd.isna(sql_statement):
+            continue
 
-    return errors_df
+        rule_results_pdf = get_rows_with_condition_spark(
+            sql_statement=sql_statement, 
+            primary_table=primary_table, 
+            error_message=error_message, 
+            error_level=error_level
+        )
+
+        if not rule_results_pdf.empty:
+            all_error_list.append(rule_results_pdf)
+
+    # combine all error results into a single DataFrame
+    if all_error_list:
+        errors_df = pd.concat(all_error_list, ignore_index=True)
+    
+    # return only the requested schema columns
+    return errors_df.reindex(columns=integrity_schema)
 
 #---------------------------------------------------------------------------------- 
 
@@ -3943,7 +4101,7 @@ def generate_integrity_summary(data_integrity_df):
     templ_df = pd.DataFrame(columns=summ_schema).astype(str)
 
     # Check if the input DataFrame is not empty
-    if len(data_integrity_df) > 0:
+    if data_integrity_df is not None and not data_integrity_df.empty:
 
         # Group by the first four columns and count the occurrences
         summary_df = (
@@ -4222,3 +4380,178 @@ def schema_validation_to_xlsx(validation_results,
 
 #----------------------------------------------------------------------------------
 
+def report_and_strip_whitespaces(
+    file_path,
+    overwrite=False,
+    sheet_name=None,
+    rm_newlines=True,
+    replace_char=""
+):
+    """
+    Cleans spreadsheet or CSV data by removing whitespace, empty unnamed columns, and optionally newlines.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the data file.
+    overwrite : bool, optional
+        If True, overwrite the original file with cleaned data. Default is False.
+    sheet_name : str, optional
+        Sheet name for Excel files. Default is None.
+    rm_newlines : bool, optional
+        If True, removes newline characters from cell values. Default is True.
+    replace_char : str, optional
+        Character to replace newline characters. Default is "".
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with whitespace and empty columns removed.
+
+    Notes
+    -----
+    - Drops empty unnamed columns before other cleaning.
+    - Removes rows that are entirely null or pseudo-null.
+    - Strips whitespace from column names and cell values.
+    - Handles newlines and preserves structural changes.
+    - Assumes read_spreadsheets and read_df_with_optimal_dtypes are available.
+    - Assumes Config.NA_VALUES and Config.NA_PATTERNS are defined externally.
+    """
+    # load file and announce check
+    print(f"\n-Checking for leading and trailing whitespaces in file: {file_path}" + (f", sheet: {sheet_name}" if sheet_name else ""))
+    df = read_spreadsheets(file_path, dtype="object", strip_num_symbols=False)
+
+    # flag to track if any structural or content change occurred
+    data_modified = False
+
+    # drop empty unnamed columns early
+    cols_before = len(df.columns)
+    df = drop_empty_unnamed_columns(df)
+    if len(df.columns) < cols_before:
+        data_modified = True
+
+    # remove rows that are entirely null/whitespace/pseudo-null
+    null_rows_mask = df.apply(lambda row: all(check_na_value(x) for x in row), axis=1)
+    if null_rows_mask.any():
+        print(f"\t- Removing {null_rows_mask.sum()} rows that are completely null or whitespace.")
+        df = df[~null_rows_mask].reset_index(drop=True)
+        data_modified = True
+
+    # clean column names by removing leading/trailing spaces
+    colname_whitespace_mask = [col for col in df.columns if str(col) != str(col).strip()]
+    if colname_whitespace_mask:
+        print(f"\t- The following column names have leading/trailing spaces:")
+        for col in colname_whitespace_mask:
+            print(f"\t\t-'{col}'")
+        df.columns = [str(col).strip() for col in df.columns]
+        print(f"\t- Leading/trailing spaces removed from column names.")
+        data_modified = True
+
+    # clean cell values by stripping leading/trailing spaces
+    changed_vals = False
+    for col in df.columns:
+        if df[col].dtype == 'object' or pd.api.types.is_string_dtype(df[col]):
+            col_series = df[col].dropna().astype(str)
+            whitespace_mask = col_series != col_series.str.strip()
+            
+            if whitespace_mask.any():
+                problem_vals = col_series[whitespace_mask].unique()
+                print(f"\t- Column '{col}' has {len(problem_vals)} values with leading/trailing spaces:")
+                for val in problem_vals:
+                    print(f"\t\t-'{val}'")
+                
+                # convert to object to avoid datetime64[ns] setitem errors
+                df[col] = df[col].astype(object).apply(lambda x: x.strip() if isinstance(x, str) else x)
+                changed_vals = True
+                data_modified = True
+
+    if not changed_vals:
+        print(f"\t- No leading/trailing spaces removed from cell values.")
+
+    # handle temp file and newlines
+    # save the temp file if any cleaning occurred
+    if data_modified:
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".csv").name
+        df.to_csv(temp_file, index=False)
+    else:
+        temp_file = file_path
+
+    # read_df_with_optimal_dtypes will recover the correct datetime/numeric types
+    df_no_newlines = read_df_with_optimal_dtypes(temp_file, rm_newlines=False)
+    df_out = read_df_with_optimal_dtypes(temp_file, rm_newlines=rm_newlines, replace_char=replace_char)
+
+    if not df_out.equals(df_no_newlines):
+        data_modified = True
+        df = df_out
+        print(f"\t- Found line returns to remove")
+        changed_count = (df.astype(str) != df_no_newlines.astype(str)).sum().sum()
+        print(f"\t\t- Number of values changed by whitespace/newline removal: {changed_count}")
+    else:
+        df = df_out
+        print(f"\t- No line returns found to remove")
+
+    # overwrite file if changes required
+    if data_modified and overwrite:
+        if file_path.lower().endswith((".xlsx", ".xls")) and sheet_name is not None:
+            print(f"\t- Overwriting sheet '{sheet_name}' in Excel file: {file_path}")
+            with pd.ExcelWriter(file_path, mode="a", if_sheet_exists="replace", engine="openpyxl") as writer:
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        elif file_path.lower().endswith(".csv"):
+            print(f"\t- Overwriting CSV file: {file_path}")
+            df.to_csv(file_path, index=False)
+        elif file_path.lower().endswith((".xlsx", ".xls")):
+            print(f"\t- Overwriting Excel file: {file_path}")
+            df.to_excel(file_path, index=False)
+    else:
+        print(f"\t- No changes required")
+
+    return df
+
+#----------------------------------------------------------------------------------
+
+def clean_csv_column_names(file_path, overwrite=False, sheet_name=None):
+    """
+    Loads a CSV or Excel file and cleans column names by lowercasing and
+    removing special characters not allowed in typical database column names
+    (e.g., %, spaces, punctuation).  Allowed: a-z, 0-9, and underscore (_).
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the CSV or Excel file.
+    overwrite : bool, optional
+        If True, overwrite the file with cleaned column names. Default False.
+    sheet_name : str or None, optional
+        Sheet name for Excel files. Default is None (first sheet).
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with column names lowercased and special characters removed.
+    """
+    # load file using the common reader (works for csv, xlsx, xls)
+    df = read_spreadsheets(file_path, sheet_name=sheet_name, dtype="object", strip_num_symbols=False)
+    original_columns = df.columns.tolist()
+
+    # clean column names by lowercasing and removing special characters
+    df.columns = [
+        re.sub(r'[^a-z0-9_]', '', col.lower().replace(' ', '_'))
+        for col in df.columns
+    ]
+    if df.columns.tolist() != original_columns:
+        print(f"\t- Column names changed:")
+        for orig, new in zip(original_columns, df.columns):
+            if orig != new:
+                print(f"\t\t- \'{orig}\' -> \'{new}\'")
+    # overwrite file if requested
+    if overwrite:
+        if file_path.lower().endswith((".xlsx", ".xls")) and sheet_name is not None:
+            with pd.ExcelWriter(file_path, mode="a", if_sheet_exists="replace", engine="openpyxl") as writer:
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        elif file_path.lower().endswith(".csv"):
+            df.to_csv(file_path, index=False)
+        elif file_path.lower().endswith((".xlsx", ".xls")):
+            df.to_excel(file_path, index=False)
+    return df
+
+#----------------------------------------------------------------------------------
