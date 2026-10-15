@@ -1383,6 +1383,24 @@ def check_all_int(df_col):
             _s.astype('Float64')
             return 'Float64'
         except (ValueError, TypeError):
+            # Fallback: strip configured numeric symbols (%, $, commas …)
+            # and retry, so columns like "75%", "$1,250" are recognized.
+            try:
+                stripped = _s.astype(str)
+                for sym in Config.NUMERIC_SYMBOLS:
+                    stripped = stripped.str.replace(sym, '', regex=False)
+                stripped = stripped.str.strip().replace('', pd.NA).dropna()
+                if stripped.empty:
+                    return str
+                numeric = pd.to_numeric(stripped, errors='coerce')
+                if numeric.notna().all():
+                    try:
+                        numeric.astype('Int64')
+                        return 'Int64'
+                    except (OverflowError, ValueError, TypeError):
+                        return 'Float64'
+            except Exception:
+                pass
             # If all numeric conversions fail, it's a string.
             return str
 #---------------------------------------------------------------------------------- 
@@ -1494,7 +1512,12 @@ def read_df_with_optimal_dtypes(
 
 
     # Initial read: attempt to detect all null-like values in the data
-    df = read_spreadsheet_with_params(file_path, sheet_name, str, na_values)
+    # Use strip_num_symbols=False so raw values like "75%" are preserved for inference
+    df = read_spreadsheets(
+        file_path, sheet_name=sheet_name, dtype=str,
+        rm_newlines=True, replace_char='', na_values=na_values,
+        strip_num_symbols=False
+    )
     read_as_na = na_values.copy()
     for col in df.columns:
         null_p_vals = [
@@ -1529,7 +1552,12 @@ def read_df_with_optimal_dtypes(
             pass
 
     # Fallback pandas-based inference (always performed for robustness)
-    df = read_spreadsheet_with_params(file_path, sheet_name, str, read_as_na)
+    # Use strip_num_symbols=False so raw values like "75%" are preserved for inference
+    df = read_spreadsheets(
+        file_path, sheet_name=sheet_name, dtype=str,
+        rm_newlines=True, replace_char='', na_values=read_as_na,
+        strip_num_symbols=False
+    )
     for col in df.columns:
         # If Spark already determined date type, retain it
         if 'date' in str(dtypes.get(col)):
@@ -1576,6 +1604,18 @@ def read_df_with_optimal_dtypes(
             col: type_str for col, type_str in dtypes.items() 
             if type_str != 'datetime64[ns]'
         }
+        # Override symbol-bearing numeric columns to str for the pd.read_csv
+        # call; conditional_numeric_conversion inside read_spreadsheets will
+        # handle the safe conversion afterwards.
+        if strip_num_symbols:
+            for col in list(read_dtype.keys()):
+                if read_dtype[col] in ('Int64', 'Float64'):
+                    raw_vals = df[col].dropna().astype(str)
+                    if raw_vals.apply(
+                        lambda x: any(s in x for s in Config.NUMERIC_SYMBOLS)
+                    ).any():
+                        read_dtype[col] = str
+
         # If no datetime columns were found, set parse_dates to None.
         if not parse_dates:
             parse_dates = None
@@ -1586,7 +1626,8 @@ def read_df_with_optimal_dtypes(
         sheet_name=sheet_name,
         dtype=read_dtype,
         na_values=read_as_na,
-        parse_dates=parse_dates
+        parse_dates=parse_dates,
+        strip_num_symbols=strip_num_symbols
     )
 
     if strip_num_symbols:
@@ -4377,7 +4418,7 @@ def report_and_strip_whitespaces(
     """
     # load file and announce check
     print(f"\n-Checking for leading and trailing whitespaces in file: {file_path}" + (f", sheet: {sheet_name}" if sheet_name else ""))
-    df = read_spreadsheets(file_path, dtype="object")
+    df = read_spreadsheets(file_path, dtype="object", strip_num_symbols=False)
 
     # flag to track if any structural or content change occurred
     data_modified = False
@@ -4445,6 +4486,7 @@ def report_and_strip_whitespaces(
         changed_count = (df.astype(str) != df_no_newlines.astype(str)).sum().sum()
         print(f"\t\t- Number of values changed by whitespace/newline removal: {changed_count}")
     else:
+        df = df_out
         print(f"\t- No line returns found to remove")
 
     # overwrite file if changes required
@@ -4466,31 +4508,28 @@ def report_and_strip_whitespaces(
 
 #----------------------------------------------------------------------------------
 
-def clean_csv_column_names(csv_path, overwrite=False):
+def clean_csv_column_names(file_path, overwrite=False, sheet_name=None):
     """
-    Loads a csv file and cleans column names by lowercasing and removing special characters.
-    removes characters not allowed in typical database column names (e.g., %, spaces, punctuation).
-    allowed: a-z, 0-9, and underscore (_).
+    Loads a CSV or Excel file and cleans column names by lowercasing and
+    removing special characters not allowed in typical database column names
+    (e.g., %, spaces, punctuation).  Allowed: a-z, 0-9, and underscore (_).
 
-    parameters
+    Parameters
     ----------
-    csv_path: path to the csv file.
-    overwrite: if true, overwrite the csv file with cleaned column names.
+    file_path : str
+        Path to the CSV or Excel file.
+    overwrite : bool, optional
+        If True, overwrite the file with cleaned column names. Default False.
+    sheet_name : str or None, optional
+        Sheet name for Excel files. Default is None (first sheet).
 
-    returns
+    Returns
     -------
-    pd.DataFrame: dataframe with column names lowercased and special characters removed.
-
-    assumptions
-    -----------
-    expects a valid csv file path.
-
-    limitations
-    -----------
-    only cleans column names, does not clean cell values.
+    pd.DataFrame
+        DataFrame with column names lowercased and special characters removed.
     """
-    # load csv file
-    df = pd.read_csv(csv_path)
+    # load file using the common reader (works for csv, xlsx, xls)
+    df = read_spreadsheets(file_path, sheet_name=sheet_name, dtype="object", strip_num_symbols=False)
     original_columns = df.columns.tolist()
 
     # clean column names by lowercasing and removing special characters
@@ -4502,10 +4541,16 @@ def clean_csv_column_names(csv_path, overwrite=False):
         print(f"\t- Column names changed:")
         for orig, new in zip(original_columns, df.columns):
             if orig != new:
-                print(f"\t\t- '{orig}' -> '{new}'")
-    # overwrite csv if requested
+                print(f"\t\t- \'{orig}\' -> \'{new}\'")
+    # overwrite file if requested
     if overwrite:
-        df.to_csv(csv_path, index=False)
+        if file_path.lower().endswith((".xlsx", ".xls")) and sheet_name is not None:
+            with pd.ExcelWriter(file_path, mode="a", if_sheet_exists="replace", engine="openpyxl") as writer:
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        elif file_path.lower().endswith(".csv"):
+            df.to_csv(file_path, index=False)
+        elif file_path.lower().endswith((".xlsx", ".xls")):
+            df.to_excel(file_path, index=False)
     return df
 
 #----------------------------------------------------------------------------------
